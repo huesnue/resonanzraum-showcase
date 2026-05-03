@@ -80,6 +80,9 @@ build/
 frames/
 *.gif
 
+# Allow demo GIF for showcase
+!assets/demo.gif
+
 # --------------------------------------
 # Test artifacts
 # --------------------------------------

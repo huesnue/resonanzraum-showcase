@@ -1,7 +1,6 @@
 import networkx as nx
 import plotly.graph_objects as go
 
-
 # ------------------------------------------
 # Plot network (final showcase version)
 # ------------------------------------------

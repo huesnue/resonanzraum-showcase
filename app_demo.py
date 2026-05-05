@@ -10,6 +10,28 @@ from scenarios.energy import load_scenario as load_energy
 from scenarios.energy_events import EVENTS
 
 
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
+
+# ------------------------------------------
+# Helper Function: Generate Month Labels
+# ------------------------------------------
+def generate_months(start="2021-01", steps=48):
+    months = []
+    current = datetime.strptime(start, "%Y-%m")
+
+    for _ in range(steps):
+        months.append(current.strftime("%b %Y"))
+        current += relativedelta(months=1)
+
+    return months
+
+# Generate month labels for the x-axis (48 months starting from Jan 2021)
+MONTHS = generate_months(start="2021-01", steps=48)
+
+# Create a mapping from month label to step index for easy lookup
+MONTH_TO_STEP = {m: i for i, m in enumerate(MONTHS)}
+
 # ------------------------------------------
 # BASIC DEMO
 # ------------------------------------------
@@ -143,7 +165,7 @@ elif scenario["type"] == "energy":
     edges = scenario["edges"]
 
     if run_clicked:
-        st.session_state["energy_history"] = run_energy_simulation(nodes, edges, steps=11)
+        st.session_state["energy_history"] = run_energy_simulation(nodes, edges, steps=48, month_to_step=MONTH_TO_STEP)
         st.session_state["step"] = 0
         st.session_state["mode"] = "manual"
 
@@ -269,7 +291,8 @@ elif scenario["type"] == "energy":
             # Metriken & Chart
             # ------------------------------------------
             current = history[st.session_state["step"]]
-
+            
+            st.write(f"📅 {MONTHS[st.session_state['step']]}")
             st.metric("System Coherence (K)", f"{current['coherence']:.2f}")
 
             coherence_series = [h["coherence"] for h in history]
@@ -287,9 +310,19 @@ elif scenario["type"] == "energy":
                 ),
                 use_container_width=True
             )
+            
+            step = st.session_state["step"]
 
             for event in EVENTS:
-                if event["step"] == st.session_state["step"]:
+
+                event_step = event.get("step")
+
+                if "month" in event and event["month"] in MONTH_TO_STEP:
+                    event_step = MONTH_TO_STEP[event["month"]]
+                else:
+                    continue
+
+                if event_step == step:
                     st.warning(f"⚠️ {event['name']}")
 
     # Fragment aufrufen

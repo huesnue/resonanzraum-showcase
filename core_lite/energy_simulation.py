@@ -1,6 +1,7 @@
 import networkx as nx
 from scenarios.energy_events import EVENTS
 import random
+import math
 
 def compute_coherence(nodes):
 
@@ -24,7 +25,7 @@ def compute_coherence(nodes):
     return satisfied / total_demand
 
 
-def run_energy_simulation(nodes, edges, steps=10):
+def run_energy_simulation(nodes, edges, steps=10, month_to_step=None):
 
     history = []
 
@@ -57,36 +58,61 @@ def run_energy_simulation(nodes, edges, steps=10):
         # 🔥 APPLY EVENTS (ΔZ Injection)
         # ------------------------------------------
         for event in EVENTS:
-            if event["step"] != step:
+            event_step = event.get("step")
+            
+            if "month" in event and month_to_step:
+                event_month = event["month"]
+
+                # 🔥 FIX: Monat prüfen bevor Zugriff
+                if event_month not in month_to_step:
+                    continue
+
+                event_step = month_to_step[event_month]
+
+            duration = event.get("duration", 1)
+            plateau = event.get("plateau", 0)
+            decay = event.get("decay", 0.5)
+
+            if step < event_step or step >= event_step + duration:
                 continue
+
+            relative_t = step - event_step
+
+            # 🔥 Intensität
+            if relative_t < plateau:
+                intensity = 1.0
+            else:
+                intensity = math.exp(-decay * (relative_t - plateau))
+
+            effective_factor = 1 + (event["factor"] - 1) * intensity
 
             if event["type"] == "capacity_shock":
                 for e in edges:
                     if e.get("type") == event.get("target"):
-                        e["capacity"] *= event["factor"]
+                        e["capacity"] *= effective_factor
 
             elif event["type"] == "supply_shock":
                 for n in nodes.values():
                     if n.get("cluster") == event.get("cluster") and n["type"] == "producer":
-                        n["supply"] *= event["factor"]
+                        n["supply"] *= effective_factor
 
             elif event["type"] == "demand_shock":
                 for n in nodes.values():
                     if n.get("cluster") == event.get("cluster") and n["type"] == "consumer":
-                        n["demand"] *= event["factor"]
+                        n["demand"] *= effective_factor
 
             elif event["type"] == "capacity_increase":
                 for n in nodes.values():
                     if n.get("cluster") == event.get("cluster"):
-                        n["capacity"] *= event["factor"]
+                        n["capacity"] *= effective_factor
 
             elif event["type"] == "coupling_shift":
                 for e in edges:
-                    e["strength"] *= event["factor"]
+                    e["strength"] *= effective_factor
 
             elif event["type"] == "uncertainty_shock":
                 for n in nodes.values():
-                    n["stress"] *= event["factor"]
+                    n["stress"] *= effective_factor
 
             elif event["type"] == "variability_shock":
                 for n in nodes.values():

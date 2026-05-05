@@ -243,7 +243,11 @@ elif scenario["type"] == "energy":
             # VOR dem Slider-Aufruf auf den aktuellen step gesetzt,
             # damit der Slider beim Rendern den richtigen Wert zeigt.
             # ------------------------------------------
-            st.session_state["simulation_step"] = st.session_state["step"]
+            if "simulation_step" not in st.session_state:
+                st.session_state["simulation_step"] = st.session_state["step"]
+
+            if is_playing:
+                st.session_state["simulation_step"] = st.session_state["step"]
 
             step = st.slider(
                 "Simulation Step",

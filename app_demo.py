@@ -12,6 +12,7 @@ from scenarios.energy_events import EVENTS
 
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
+import math
 
 # ------------------------------------------
 # Helper Function: Generate Month Labels
@@ -62,7 +63,10 @@ def run_collapse():
 # ------------------------------------------
 def plot_series(data, title):
     fig = go.Figure()
-    fig.add_trace(go.Scatter(y=data, mode="lines"))
+    fig.add_trace(go.Scatter(
+        y=data,
+        mode="lines"
+    ))
     fig.update_layout(title=title, height=250, margin=dict(l=20, r=20, t=40, b=20))
     return fig
 
@@ -224,6 +228,42 @@ elif scenario["type"] == "energy":
                 st.rerun()          # volles App-Rerun, nicht scope="fragment"
 
         # ------------------------------------------
+        # EVENT INTENSITY (korrekt)
+        # ------------------------------------------
+        event_intensity_series = []
+
+        for step_idx in range(len(history)):
+
+            total_intensity = 0.0
+
+            for event in EVENTS:
+
+                event_step = event.get("step")
+
+                if "month" in event and event["month"] in MONTH_TO_STEP:
+                    event_step = MONTH_TO_STEP[event["month"]]
+                else:
+                    continue
+
+                duration = event.get("duration", 1)
+                plateau = event.get("plateau", 0)
+                decay = event.get("decay", 0.5)
+
+                if step_idx < event_step or step_idx >= event_step + duration:
+                    continue
+
+                relative_t = step_idx - event_step
+
+                if relative_t < plateau:
+                    intensity = 1.0
+                else:
+                    intensity = math.exp(-decay * (relative_t - plateau))
+
+                total_intensity += intensity
+
+            event_intensity_series.append(total_intensity)
+            
+        # ------------------------------------------
         # Layout
         # ------------------------------------------
         col_left, col_right = st.columns([1, 2])
@@ -296,7 +336,22 @@ elif scenario["type"] == "energy":
             st.metric("System Coherence (K)", f"{current['coherence']:.2f}")
 
             coherence_series = [h["coherence"] for h in history]
-            st.line_chart(coherence_series, height=150)
+            fig = go.Figure()
+
+            fig.add_trace(go.Scatter(
+                y=coherence_series,
+                mode="lines",
+                name="Coherence (K)"
+            ))
+
+            fig.add_trace(go.Scatter(
+                y=event_intensity_series,
+                mode="lines",
+                name="Event Intensity",
+                line=dict(dash="dot")
+            ))
+
+            st.plotly_chart(fig, use_container_width=True)
 
         # ------------------------------------------
         # Netzwerk-Plot
@@ -313,6 +368,11 @@ elif scenario["type"] == "energy":
             
             step = st.session_state["step"]
 
+            # ------------------------------------------
+            # EVENTS (korrekt für aktuellen Step)
+            # ------------------------------------------
+            current_step = st.session_state["step"]
+
             for event in EVENTS:
 
                 event_step = event.get("step")
@@ -322,8 +382,10 @@ elif scenario["type"] == "energy":
                 else:
                     continue
 
-                if event_step == step:
-                    st.warning(f"⚠️ {event['name']}")
+                duration = event.get("duration", 1)
 
+                if current_step >= event_step and current_step < event_step + duration:
+                    st.warning(f"⚠️ {event['name']}")
+                    
     # Fragment aufrufen
     playback_panel(history, max_step)

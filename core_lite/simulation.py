@@ -25,9 +25,9 @@ def run_simulation(
             G = nx.erdos_renyi_graph(n_nodes, connection_prob)
 
     history = {
-        "dE_dt": [],
+        "drift_signal": [],
         "graphs": [],
-        "W_grad": [],
+        "early_warning": [],
         "stability": []
     }
 
@@ -47,12 +47,12 @@ def run_simulation(
             current_stress = stress * 0.3
 
         # -----------------------------
-        # Erosion
+        # Structural erosion accumulation
         # -----------------------------
         noise = random.uniform(0, 0.002)
         erosion += (current_stress + potential * 0.05) * 0.1 + noise
 
-        dE_dt = erosion
+        drift_signal = erosion
 
         # -----------------------------
         # Node Load
@@ -61,7 +61,7 @@ def run_simulation(
             node_load[n] = min(1.0, node_load[n] + current_stress * 0.05)
 
         # -----------------------------
-        # Edge Removal (nur EINMAL!)
+        # Edge Removal
         # -----------------------------
         edges_to_remove = []
 
@@ -74,7 +74,7 @@ def run_simulation(
         G.remove_edges_from(edges_to_remove)
 
         # -----------------------------
-        # Rekopplung (stabil)
+        # Recoupling (stable system only)
         # -----------------------------
         if stress_mode == "constant":
             for _ in range(2):
@@ -87,12 +87,12 @@ def run_simulation(
         # -----------------------------
         # Signals
         # -----------------------------
-        W_grad = max(0, erosion - 0.02)
+        early_warning = max(0, erosion - 0.02)
         stability = max(0, 1.0 - erosion)
 
-        history["dE_dt"].append(dE_dt)
+        history["drift_signal"].append(drift_signal)
         history["graphs"].append(G.copy())
-        history["W_grad"].append(W_grad)
+        history["early_warning"].append(early_warning)
         history["stability"].append(stability)
 
     return G, history, node_load, edge_state

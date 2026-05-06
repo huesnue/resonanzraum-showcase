@@ -94,3 +94,8 @@ htmlcov/
 # Notebook demo separat halten
 # --------------------------------------
 notebooks/
+
+# --------------------------------------
+# Scripts (optional, falls du Skripte außerhalb von Jupyter hast)
+# --------------------------------------
+scripts/

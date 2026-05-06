@@ -19,9 +19,9 @@ def plot_network(G, node_load, edge_state, highlight_nodes=None, highlight_edges
 
     if highlight_edges is None:
         highlight_edges = set()
-    
+
     # ------------------------------------------
-    # 🔥 FIX: Layout nur wiederverwenden wenn Nodes identisch
+    # Reuse layout if node set is unchanged
     # ------------------------------------------
     nodes_key = tuple(sorted(G.nodes()))
 
@@ -50,9 +50,6 @@ def plot_network(G, node_load, edge_state, highlight_nodes=None, highlight_edges
         "new": 4.5
     }
 
-    # ------------------------------------------
-    # 🔥 FIX: Highlighted edges
-    # -------------------------------------------
     for (u, v) in G.edges():
         key = tuple(sorted((u, v)))
         state = edge_state.get(key, "strong")
@@ -60,9 +57,8 @@ def plot_network(G, node_load, edge_state, highlight_nodes=None, highlight_edges
         x0, y0 = pos[u]
         x1, y1 = pos[v]
 
-        # 🔥 Highlight has priority
         if key in highlight_edges:
-            color = "#00cfff"   # blue (Event)
+            color = "#00cfff"
             width = 4.5
         else:
             color = color_map[state]
@@ -72,38 +68,35 @@ def plot_network(G, node_load, edge_state, highlight_nodes=None, highlight_edges
             x=[x0, x1, None],
             y=[y0, y1, None],
             mode="lines",
-            line=dict(
-                width=width,
-                color=color
-            ),
+            line=dict(width=width, color=color),
             hoverinfo="none"
         ))
 
-        # ------------------------------------------
-        # 🔥 Event Overlay (NEU – HIER!)
-        # ------------------------------------------
         if key in highlight_edges:
             edge_traces.append(go.Scatter(
                 x=[x0, x1, None],
                 y=[y0, y1, None],
                 mode="lines",
-                line=dict(
-                    width=width_map[state] + 2,
-                    color="purple"
-                ),
+                line=dict(width=width_map[state] + 2, color="purple"),
                 opacity=0.6,
                 hoverinfo="none"
             ))
-        
+
     # ------------------------------------------
-    # 🔥 FIX: NORMALISIERTE FARBE
+    # NODES
     # ------------------------------------------
     max_load = max(node_load.values()) if node_load else 1
 
-    node_x, node_y, node_colors, node_sizes = [], [], [], []
+    capacity_values = [v for v in nx.get_node_attributes(G, "capacity").values() if v is not None]
+    has_capacity = len(capacity_values) > 0
+    max_capacity = max(capacity_values) if has_capacity else 1
 
+    # Degree-based cluster detection for graphs without capacity attributes
     degrees = dict(G.degree())
     max_degree = max(degrees.values()) if degrees else 1
+    degree_threshold = max_degree * 0.6
+
+    node_x, node_y, node_colors, node_sizes = [], [], [], []
 
     for node in G.nodes():
 
@@ -111,42 +104,35 @@ def plot_network(G, node_load, edge_state, highlight_nodes=None, highlight_edges
         node_x.append(x)
         node_y.append(y)
 
+        if has_capacity:
+            # Energy scenario: size based on capacity
+            capacity = G.nodes[node].get("capacity", 1.0) or 1.0
+            norm_capacity = capacity / max_capacity if max_capacity > 0 else 0
+            size = 8 + (norm_capacity ** 1.5) * 30
+        else:
+            # Basic scenario: cluster nodes (high degree) larger, regular nodes smaller
+            degree = degrees.get(node, 0)
+            if degree >= degree_threshold:
+                size = 14
+            else:
+                size = 7
+
+        # Color based on load (with highlight override)
         load = node_load.get(node, 0.1)
         normalized_load = load / max_load if max_load > 0 else 0
 
-        # -------------------------------------------
-        # 🔥 FIX: Highlighted nodes
-        # 🔥 Highlight has priority
-        # -------------------------------------------
         if node in highlight_nodes:
-            node_sizes.append(size * 1.5)
             node_colors.append("purple")
+            node_sizes.append(size * 1.5)
         else:
             if normalized_load > 0.7:
-                node_colors.append("#ff3b3b")   # red
+                node_colors.append("#ff3b3b")
             elif normalized_load > 0.4:
-                node_colors.append("#ff9c3b")   # orange
+                node_colors.append("#ff9c3b")
             else:
-                node_colors.append("#6bd96b")   # green
-                
-        # ------------------------------------------
-        # 🔥 FIX: Node size based on degree
-        # ------------------------------------------
-        capacity = G.nodes[node].get("capacity", 1.0)
+                node_colors.append("#6bd96b")
+            node_sizes.append(size)
 
-        # Normalization of capacity for size scaling
-        max_capacity = max(nx.get_node_attributes(G, "capacity").values()) if G.nodes else 1
-        norm_capacity = capacity / max_capacity if max_capacity > 0 else 0
-
-        # Skaling (non-linear → better Differentiation)
-        size = 10 + (norm_capacity ** 1.5) * 40
-        
-        node_sizes.append(size)
-
-    # ------------------------------------------
-    # NODES
-    # Fix: Hovertext shows Node ID
-    # ------------------------------------------
     node_trace = go.Scatter(
         x=node_x,
         y=node_y,

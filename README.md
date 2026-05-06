@@ -2,7 +2,7 @@
 
 ## Why systems fail before they break
 
-Most systems don’t collapse suddenly.
+Most systems don't collapse suddenly.
 
 They start to **erode structurally** long before anything becomes visible.
 
@@ -15,15 +15,19 @@ This project demonstrates a simple but powerful idea:
 
 ## 🔍 What this demo shows
 
-- Two systems that **look structurally identical**
-- One remains stable
-- One will eventually collapse
+Two scenarios illustrate how structural weakening can be detected early:
 
-But:
+**Basic Demo** — Two network systems that look structurally identical at the start. One remains stable. One will eventually collapse. The signals diverge long before the collapse becomes visible.
 
-- An **early signal (dE/dt)** already reveals the difference
-- A **structural signal (W_grad)** confirms it later
-- Traditional metrics react **too late**
+**Energy Crisis (2021–2025)** — A simulated energy supply network, driven by a timeline of 22 real-world geopolitical events. Watch how supply shocks, infrastructure disruptions, and demand surges propagate through the network — and how structural signals respond before system health visibly drops.
+
+Key signals tracked in both scenarios:
+
+- **Structural Drift** — detects early internal change before it becomes observable
+- **Early Warning** — confirms structural weakening as it accumulates
+- **Stability** — the combined system state, which reacts last
+
+Traditional monitoring reacts to the last of these. This demo shows why watching the first two matters.
 
 ---
 
@@ -47,24 +51,28 @@ streamlit run app_demo.py
 
 ## 🧠 Key insight
 
-At the moment where both systems still look identical:
+At the moment where both systems still look identical on the surface:
 
 - One system is already changing internally
-- The collapse has already started — just not visibly
+- The structural erosion has already begun — just not visibly yet
 
 This is the core idea behind the **Resonanzraum approach**:
 
 > Structural change precedes observable failure.
 
+The goal is not to predict *that* a system will fail.  
+The goal is to detect *when it starts to fail* — invisibly.
+
 ---
 
-## ⚙️ What’s inside
+## ⚙️ What's inside
 
 This repository contains a **simplified demonstration version**:
 
-- lightweight simulation (`core_lite`)
-- network visualization
-- early signal tracking
+- Lightweight network simulation (`core_lite`)
+- Energy system scenario with real-world event timeline
+- Network visualization with event highlighting
+- Early signal tracking across time
 
 It is designed to illustrate behavior, not to reproduce the full model.
 
@@ -72,19 +80,11 @@ It is designed to illustrate behavior, not to reproduce the full model.
 
 ## 🔒 About the model
 
-This demo is based on the broader **Resonanzraum framework**, which focuses on:
+This demo is based on the broader **Resonanzraum framework**.
 
-- structural coupling  
-- coherence  
-- system capacity  
-- early warning signals  
+The full model addresses how complex systems — financial networks, organizations, technical platforms, ecosystems — develop structural vulnerabilities over time, and how those vulnerabilities can be detected before they become visible crises.
 
-The full model includes additional layers such as:
-
-- feature mapping  
-- calibration  
-- real-world data integration  
-- advanced early warning logic  
+The full model and its implementation are not part of this repository.
 
 ---
 
@@ -92,10 +92,11 @@ The full model includes additional layers such as:
 
 In many domains, failure is detected too late:
 
-- financial systems  
-- organizations  
-- technical platforms  
-- ecosystems  
+- financial systems
+- organizations
+- technical platforms
+- energy infrastructure
+- ecosystems
 
 This approach explores how to detect:
 
@@ -109,9 +110,9 @@ This is a first public showcase.
 
 Future work will explore:
 
-- real-world data integration  
-- domain-specific applications (e.g. finance, platforms)  
-- advanced early warning systems  
+- real-world data integration
+- domain-specific applications (finance, platforms, organizations)
+- extended early warning systems
 
 ---
 
@@ -119,7 +120,7 @@ Future work will explore:
 
 If you are interested in the idea, feedback or collaboration:
 
-→ Feel free to connect via LinkedIn
+→ Feel free to connect via [LinkedIn](https://www.linkedin.com/in/huesnue-turkac)
 
 ---
 
@@ -132,6 +133,3 @@ It is intentionally simplified and does not represent the full model or its cali
 ## License
 
 This project is licensed under the MIT License.
-
-Note: This repository contains a simplified demonstration version of the Resonanzraum approach.
-The full model and its implementation are not part of this repository.

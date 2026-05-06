@@ -27,10 +27,7 @@ def generate_months(start="2021-01", steps=48):
 
     return months
 
-# Generate month labels for the x-axis (48 months starting from Jan 2021)
 MONTHS = generate_months(start="2021-01", steps=48)
-
-# Create a mapping from month label to step index for easy lookup
 MONTH_TO_STEP = {m: i for i, m in enumerate(MONTHS)}
 
 # ------------------------------------------
@@ -83,11 +80,11 @@ Most systems don't collapse suddenly.
 
 They start to **erode structurally** long before anything becomes visible.
 
-This demo shows:
+This demo shows two signals that emerge **before** the system breaks:
 
-- an **early signal (dE/dt)**
-- a **structural confirmation (W_grad)**
-- while the system still appears **stable**
+- a **Structural Drift** signal — detects early change in system behavior
+- an **Early Warning** signal — confirms structural weakening
+- while the system still appears **stable on the surface**
 """)
 
 
@@ -156,8 +153,8 @@ if scenario["type"] == "basic":
         st.subheader("Early Signals")
 
         col1, col2 = st.columns(2)
-        col1.plotly_chart(plot_series(hist_stable["dE_dt"], "dE/dt A"), use_container_width=True)
-        col2.plotly_chart(plot_series(hist_collapse["dE_dt"], "dE/dt B"), use_container_width=True)
+        col1.plotly_chart(plot_series(hist_stable["drift_signal"], "Structural Drift – System A"), use_container_width=True)
+        col2.plotly_chart(plot_series(hist_collapse["drift_signal"], "Structural Drift – System B"), use_container_width=True)
 
 
 # ==========================================
@@ -183,52 +180,26 @@ elif scenario["type"] == "energy":
     st.divider()
     st.subheader("Energy Network Simulation")
 
-    # ==========================================
-    # PLAYBACK FRAGMENT
-    #
-    # FIX 2 (Diskrepanz 2): Ersetzt time.sleep() + blindes st.rerun().
-    #
-    # @st.fragment(run_every=1.0) lässt Streamlit den Fragment-Body
-    # automatisch jede Sekunde neu ausführen, OHNE den Server-Thread
-    # zu blockieren (kein time.sleep) und OHNE das gesamte Script neu
-    # zu starten (kein vollständiges st.rerun im Takt-Pfad).
-    #
-    # Quelle: https://docs.streamlit.io/develop/api-reference/execution-flow/st.fragment
-    # „If run_every is set, Streamlit will also rerun the fragment at
-    #  the specified interval while the session is active, even if the
-    #  user is not interacting with your app."
-    #
-    # run_every=None deaktiviert den Timer → Fragment verhält sich
-    # wie normaler Code, kein automatischer Rerun.
-    # ==========================================
     run_every = 1.0 if st.session_state["mode"] == "playback" else None
 
     @st.fragment(run_every=run_every)
     def playback_panel(history, max_step):
-        """
-        Enthält den gesamten interaktiven Bereich (Slider, Buttons,
-        Charts). Als Fragment läuft nur dieser Block beim Timer-Tick
-        neu — der Rest der Seite (Titel, Markdown, Szenario-Auswahl)
-        bleibt unberührt.
-        """
+
         is_playing = st.session_state["mode"] == "playback"
 
         # ------------------------------------------
-        # Schritt automatisch weiterschalten (Playback)
+        # Auto-advance step during playback
         # ------------------------------------------
         if is_playing:
             current_step = st.session_state["step"]
             if current_step < max_step:
                 st.session_state["step"] = current_step + 1
             else:
-                # Ende erreicht → manuellen Modus aktivieren und
-                # vollständigen App-Rerun auslösen, damit run_every
-                # im Decorator auf None wechselt und der Timer stoppt.
                 st.session_state["mode"] = "manual"
-                st.rerun()          # volles App-Rerun, nicht scope="fragment"
+                st.rerun()
 
         # ------------------------------------------
-        # EVENT INTENSITY (korrekt)
+        # EVENT INTENSITY SERIES
         # ------------------------------------------
         event_intensity_series = []
 
@@ -262,7 +233,7 @@ elif scenario["type"] == "energy":
                 total_intensity += intensity
 
             event_intensity_series.append(total_intensity)
-            
+
         # ------------------------------------------
         # Layout
         # ------------------------------------------
@@ -276,8 +247,6 @@ elif scenario["type"] == "energy":
                 if st.button("▶ Start Playback", disabled=is_playing):
                     st.session_state["mode"] = "playback"
                     st.session_state["step"] = 0
-                    # Vollständigen App-Rerun, damit der Decorator
-                    # mit run_every=1.0 neu instanziiert wird.
                     st.rerun()
 
             with col_b2:
@@ -285,26 +254,6 @@ elif scenario["type"] == "energy":
                     st.session_state["mode"] = "manual"
                     st.rerun()
 
-            # ------------------------------------------
-            # FIX 1 (Diskrepanz 1): Slider mit stabilem key.
-            #
-            # key="simulation_step" verankert die Widget-Identität
-            # im Session State. Damit bleibt der angezeigte Wert
-            # beim Wechsel von disabled=True → disabled=False
-            # erhalten, weil Streamlit den Key-Wert bevorzugt
-            # gegenüber dem value-Parameter.
-            #
-            # Quelle: Streamlit Widget Behavior Docs:
-            # „Note that [...] disabling a widget do not affect
-            #  the widget identity."
-            # Und GitHub Issue #4318:
-            # „Disabling a widget resets the widget's value
-            #  to its default." → abgesichert durch key + Session State.
-            #
-            # Wichtig: Der Session-State-Key "simulation_step" wird
-            # VOR dem Slider-Aufruf auf den aktuellen step gesetzt,
-            # damit der Slider beim Rendern den richtigen Wert zeigt.
-            # ------------------------------------------
             if "simulation_step" not in st.session_state:
                 st.session_state["simulation_step"] = st.session_state["step"]
 
@@ -315,83 +264,72 @@ elif scenario["type"] == "energy":
                 "Simulation Step",
                 min_value=0,
                 max_value=max_step,
-                key="simulation_step",   # stabiler Key sichert Wert bei disabled-Wechsel
+                key="simulation_step",
                 disabled=is_playing,
             )
 
-            # Manuelle Slider-Änderung nur im Step-Mode übernehmen.
-            # Im Playback-Modus ist der Slider disabled, sein Wert
-            # wird nicht vom Nutzer verändert — wir lesen ihn daher
-            # nicht zurück (das würde den programmatisch gesetzten
-            # step überschreiben).
             if not is_playing:
                 st.session_state["step"] = step
 
             # ------------------------------------------
-            # Metriken & Chart
+            # Metrics & Chart
             # ------------------------------------------
             current = history[st.session_state["step"]]
-            
+
             st.write(f"📅 {MONTHS[st.session_state['step']]}")
-            st.metric("System Coherence (K)", f"{current['coherence']:.2f}")
+            st.metric("System Health", f"{current['system_health']:.2f}")
 
-            coherence_series = [h["coherence"] for h in history]
-            
-            # ------------------------------------------
-            # Erosion Signal: Negative change in Coherence (dK/dt)
-            # ------------------------------------------
-            w_grad_series = []
+            health_series = [h["system_health"] for h in history]
 
-            for i in range(len(coherence_series)):
+            # ------------------------------------------
+            # Early Warning: rate of change in system health
+            # A rising value signals structural weakening
+            # ------------------------------------------
+            early_warning_series = []
+
+            for i in range(len(health_series)):
                 if i == 0:
-                    w_grad_series.append(0)
+                    early_warning_series.append(0)
                 else:
-                    delta = coherence_series[i] - coherence_series[i-1]
-                    w_grad_series.append(-delta)  # negative change = erosion signal
-                    
+                    delta = health_series[i] - health_series[i - 1]
+                    early_warning_series.append(-delta)
+
             # ------------------------------------------
-            # Stability Series: Combined Signal
+            # Stability: combined structural signal
             # ------------------------------------------
             stability_series = [
-                h["coherence"] * (1 - (sum(h["load"].values()) / len(h["load"])))
+                h["system_health"] * (1 - (sum(h["load"].values()) / len(h["load"])))
                 for h in history
             ]
-            
+
             fig = go.Figure()
 
-            # 1. Event Intensity (ΔZ)
             fig.add_trace(go.Scatter(
                 y=event_intensity_series,
                 mode="lines",
-                name="Event Intensity (ΔZ)",
+                name="Event Pressure",
                 line=dict(dash="dot")
             ))
 
-            # 2. Early Warning Indicator (W_grad)
             fig.add_trace(go.Scatter(
-                y=w_grad_series,
+                y=early_warning_series,
                 mode="lines",
-                name="Early Warning (W)"
+                name="Early Warning"
             ))
 
-            # 3. Stability (St)
             fig.add_trace(go.Scatter(
                 y=stability_series,
                 mode="lines",
-                name="Stability (St)"
+                name="Stability"
             ))
 
-            # -------------------------------------------
-            # FIX 4 (Discrepancy 4): Improved layout and legend
-            # -------------------------------------------
             fig.update_layout(
-                height=300,  # 🔥 etwas mehr Platz
-                margin=dict(l=20, r=20, t=40, b=60),  # 🔥 mehr Bottom-Abstand
-
+                height=300,
+                margin=dict(l=20, r=20, t=40, b=60),
                 legend=dict(
                     orientation="h",
                     yanchor="bottom",
-                    y=-0.3,   # 🔥 unterhalb des Charts
+                    y=-0.3,
                     xanchor="center",
                     x=0.5
                 )
@@ -400,34 +338,13 @@ elif scenario["type"] == "energy":
             st.plotly_chart(fig, use_container_width=True)
 
         # ------------------------------------------
-        # Netzwork-Plot
+        # Network Plot
         # ------------------------------------------
         with col_right:
-            # ------------------------------------------
-            # HIGHLIGHT NODES & EDGES BASED ON ACTIVE EVENTS
-            # ------------------------------------------
+
             highlight_nodes = set()
             highlight_edges = set()
-            
-            # ------------------------------------------
-            # FIX 3 (Discrepancy 3): Highlighting based on active events
-            # ------------------------------------------  
-            st.plotly_chart(
-                plot_network(
-                    current["graph"],
-                    current["load"],
-                    current["edges"],
-                    highlight_nodes=highlight_nodes,
-                    highlight_edges=highlight_edges
-                ),
-                use_container_width=True
-            )
-            
-            step = st.session_state["step"]
 
-            # ------------------------------------------
-            # ACTIVE EVENTS (NEU – sauber)
-            # ------------------------------------------
             current_step = st.session_state["step"]
 
             active_events = []
@@ -447,30 +364,28 @@ elif scenario["type"] == "energy":
                     active_events.append(event)
 
             for event in active_events:
-                # -------------------------------------------
-                # Fix 3 (Discrepancy 3): Event-Target-Handling corrected.
-                # Prior: all events highlighted all edges, regardless of target.
-                # Neu: Nur Events mit target="pipeline" heben alle Kanten hervor.
-                # Other events can specify clusters to highlight specific nodes.
-                # -------------------------------------------
                 if event.get("target") == "pipeline":
                     for edge_key in current["edges"]:
                         highlight_edges.add(edge_key)
-            
+
                 if "cluster" in event:
                     for node, data in current["nodes"].items():
                         if data.get("cluster") == event["cluster"]:
                             highlight_nodes.add(node)
 
-                if event.get("target") == "pipeline":
-                    for edge_key in current["edges"]:
-                        highlight_edges.add(edge_key)
-            
-            # ------------------------------------------
-            # EVENTS anzeigen
-            # ------------------------------------------
+            st.plotly_chart(
+                plot_network(
+                    current["graph"],
+                    current["load"],
+                    current["edges"],
+                    highlight_nodes=highlight_nodes,
+                    highlight_edges=highlight_edges
+                ),
+                use_container_width=True
+            )
+
             for event in active_events:
                 st.warning(f"⚠️ {event['name']}")
-                    
-    # Fragment aufrufen
+
+    # Run fragment
     playback_panel(history, max_step)

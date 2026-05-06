@@ -2,6 +2,16 @@ import networkx as nx
 from scenarios.energy_events import EVENTS
 import random
 import math
+import copy
+import logging
+
+logging.basicConfig(
+    filename='simulation.log',
+    filemode='w',
+    level=logging.INFO,
+    format='%(message)s'
+)
+log = logging.getLogger('energy_sim')
 
 
 def compute_system_health(nodes):
@@ -23,17 +33,185 @@ def compute_system_health(nodes):
     if total_demand == 0:
         return 1.0
 
-    raw = satisfied / total_demand
-
-    # Minimum floor to prevent complete collapse in visualization
-    health = max(0.05, raw)
-
+    health = max(0.05, satisfied / total_demand)
     return health
+
+
+def compute_market_stress(nodes):
+    """
+    Per-cluster demand satisfaction stress.
+    Uses received vs demand (after flow) so transit/hub clusters
+    are not penalized for having no local supply.
+    Returns dict: cluster -> market_stress in [0, 1]
+    """
+    cluster_received = {}
+    cluster_demand = {}
+
+    for n in nodes.values():
+        if n["status"] == "failed":
+            continue
+        c = n.get("cluster", "default")
+        demand = n.get("demand", 0.0)
+        received = n.get("received", 0.0)
+        if demand > 0:
+            cluster_demand[c] = cluster_demand.get(c, 0.0) + demand
+            cluster_received[c] = cluster_received.get(c, 0.0) + min(demand, received)
+
+    market_stress = {}
+    for c in cluster_demand:
+        demand = cluster_demand[c]
+        received = cluster_received.get(c, 0.0)
+        if demand > 0:
+            market_stress[c] = max(0.0, (demand - received) / demand)
+        else:
+            market_stress[c] = 0.0
+
+    return market_stress
+
+
+def get_cluster_strengths(nodes, edges):
+    """
+    Determines the strongest node per cluster based on:
+    supply + capacity + number of active connections.
+    Returns dict: cluster -> node_id of the hub/anchor node.
+    """
+    # Count active connections per node
+    connection_count = {}
+    for e in edges:
+        if e["status"] == "active":
+            connection_count[e["source"]] = connection_count.get(e["source"], 0) + 1
+            connection_count[e["target"]] = connection_count.get(e["target"], 0) + 1
+
+    cluster_scores = {}
+    for node_id, n in nodes.items():
+        if n["status"] == "failed":
+            continue
+        c = n.get("cluster", "default")
+        score = (
+            n.get("supply", 0) * 0.4 +
+            n.get("capacity", 0) * 0.4 +
+            connection_count.get(node_id, 0) * 10.0
+        )
+        if c not in cluster_scores or score > cluster_scores[c][1]:
+            cluster_scores[c] = (node_id, score)
+
+    return {c: v[0] for c, v in cluster_scores.items()}
+
+
+def build_affinity_matrix(nodes, edges, affinity_state):
+    """
+    Builds a node-to-node affinity dict used to influence layout distances.
+    Base affinity = edge strength. Modified by alliance_shift events.
+    """
+    affinity = {}
+
+    for e in edges:
+        if e["status"] == "failed":
+            continue
+        u, v = e["source"], e["target"]
+        key = tuple(sorted((u, v)))
+        affinity[key] = e.get("strength", 0.5)
+
+    # Apply cluster-level affinity shifts
+    for (c1, c2), delta in affinity_state.items():
+        for u, nu in nodes.items():
+            for v, nv in nodes.items():
+                if u >= v:
+                    continue
+                if nu.get("cluster") == c1 and nv.get("cluster") == c2:
+                    key = tuple(sorted((u, v)))
+                    base = affinity.get(key, 0.3)
+                    affinity[key] = max(0.05, min(1.0, base + delta))
+                elif nu.get("cluster") == c2 and nv.get("cluster") == c1:
+                    key = tuple(sorted((u, v)))
+                    base = affinity.get(key, 0.3)
+                    affinity[key] = max(0.05, min(1.0, base + delta))
+
+    return affinity
+
+
+def compute_dynamic_layout(G, nodes, affinity, cluster_anchors, pos_prev):
+    """
+    Spring layout where edge weights = affinity (higher affinity = shorter distance).
+    Cluster anchor nodes gravitate to centre.
+    Isolated nodes (no active edges) drift to the periphery.
+    Uses previous positions as starting point for smooth animation.
+    """
+    if len(G.nodes()) == 0:
+        return {}
+
+    # Identify isolated nodes (no edges in current graph)
+    isolated = {n for n in G.nodes() if G.degree(n) == 0}
+    connected = set(G.nodes()) - isolated
+
+    # Build weighted layout graph – only connected nodes participate in spring
+    G_layout = nx.Graph()
+    G_layout.add_nodes_from(connected)
+
+    for (u, v) in G.edges():
+        if u in isolated or v in isolated:
+            continue
+        key = tuple(sorted((u, v)))
+        aff = affinity.get(key, 0.3)
+        G_layout.add_edge(u, v, weight=aff)
+
+    # Soft cohesion edges: cluster members pulled toward their anchor
+    cluster_members = {}
+    for node_id, n in nodes.items():
+        if node_id not in connected:
+            continue
+        c = n.get("cluster", "default")
+        cluster_members.setdefault(c, []).append(node_id)
+
+    for c, members in cluster_members.items():
+        anchor = cluster_anchors.get(c)
+        if anchor is None or anchor not in G_layout.nodes():
+            continue
+        for m in members:
+            if m != anchor and m in G_layout.nodes() and not G_layout.has_edge(anchor, m):
+                G_layout.add_edge(anchor, m, weight=0.15)
+
+    # Spring layout for connected nodes only
+    init_pos_connected = {k: v for k, v in (pos_prev or {}).items() if k in connected}
+
+    if len(G_layout.nodes()) > 0:
+        pos = nx.spring_layout(
+            G_layout,
+            weight="weight",
+            pos=init_pos_connected if init_pos_connected else None,
+            iterations=30,
+            seed=None,
+            k=1.8 / math.sqrt(max(len(G_layout.nodes()), 1))
+        )
+    else:
+        pos = {}
+
+    # Place isolated nodes at periphery (outside radius 1.4)
+    # Use previous position if available, push outward; otherwise scatter on ring
+    n_isolated = len(isolated)
+    for idx, node_id in enumerate(sorted(isolated)):
+        if pos_prev and node_id in pos_prev:
+            px, py = pos_prev[node_id]
+            dist = math.sqrt(px**2 + py**2) or 1.0
+            # Push further out each step, capped at 2.0
+            scale = min(2.0, dist * 1.08)
+            pos[node_id] = (px / dist * scale, py / dist * scale)
+        else:
+            # First appearance: place on outer ring
+            angle = 2 * math.pi * idx / max(n_isolated, 1)
+            r = 1.6
+            pos[node_id] = (r * math.cos(angle), r * math.sin(angle))
+
+    return pos
 
 
 def run_energy_simulation(nodes, edges, steps=10, month_to_step=None):
 
     history = []
+    pos_prev = None
+
+    # Affinity state: (cluster1, cluster2) -> cumulative delta
+    affinity_state = {}
 
     for step in range(steps):
 
@@ -47,20 +225,33 @@ def run_energy_simulation(nodes, edges, steps=10, month_to_step=None):
             e["flow"] = 0.0
 
         # ------------------------------------------
-        # Store initial supply on first step
+        # Store initial supply and capacity on first step
         # ------------------------------------------
         if step == 0:
             for n in nodes.values():
                 n["initial_supply"] = n["supply"]
+            for e in edges:
+                e["initial_capacity"] = e["capacity"]
+                e["initial_strength"] = e["strength"]
 
-        # Restore supply for active nodes each step
+        # Restore supply, demand and edge capacity each step
+        # All events modify only the current step's values
         for n in nodes.values():
             if "initial_supply" in n and n["status"] != "failed":
                 n["supply"] = n["initial_supply"]
+                n["base_demand"] = n.get("base_demand", n["demand"])
+        for n in nodes.values():
+            if n["status"] != "failed" and "base_demand" in n:
+                n["demand"] = n["base_demand"]
+        for e in edges:
+            if e["status"] == "active" and "initial_capacity" in e:
+                e["capacity"] = e["initial_capacity"]
+                # Gradually restore strength toward initial (recovery over time)
+                init_str = e.get("initial_strength", 1.0)
+                e["strength"] = min(init_str, e["strength"] * 1.05)
 
         # ------------------------------------------
-        # Decay stress before applying new events
-        # Prevents unbounded stress accumulation
+        # Decay stress
         # ------------------------------------------
         for n in nodes.values():
             if n["status"] != "failed":
@@ -74,99 +265,96 @@ def run_energy_simulation(nodes, edges, steps=10, month_to_step=None):
 
             if "month" in event and month_to_step:
                 event_month = event["month"]
-
                 if event_month not in month_to_step:
                     continue
-
                 event_step = month_to_step[event_month]
 
             duration = event.get("duration", 1)
             plateau = event.get("plateau", 0)
-            decay = event.get("decay", 0.5)
+            decay_rate = event.get("decay", 0.5)
 
             if step < event_step or step >= event_step + duration:
                 continue
 
             relative_t = step - event_step
-
-            # Intensity with plateau and decay
-            if relative_t < plateau:
-                intensity = 1.0
-            else:
-                intensity = math.exp(-decay * (relative_t - plateau))
+            intensity = 1.0 if relative_t < plateau else math.exp(-decay_rate * (relative_t - plateau))
 
             event_strength = 1.5
-            effective_factor = 1 + (event["factor"] - 1) * (0.5 + 0.5 * intensity) * event_strength
+            effective_factor = 1 + (event["factor"] - 1) * (0.5 + 0.5 * intensity) * event_strength \
+                if "factor" in event else 1.0
 
-            if event["type"] == "capacity_shock":
+            etype = event["type"]
+
+            if etype == "capacity_shock":
                 for e in edges:
                     if e.get("type") == event.get("target"):
                         e["capacity"] *= effective_factor
 
-            elif event["type"] == "supply_shock":
+            elif etype == "supply_shock":
                 for n in nodes.values():
                     if n.get("cluster") == event.get("cluster") and n["type"] == "producer":
                         n["supply"] *= effective_factor
 
-            elif event["type"] == "demand_shock":
+            elif etype == "demand_shock":
                 for n in nodes.values():
                     if n.get("cluster") == event.get("cluster") and n["type"] == "consumer":
                         n["demand"] *= effective_factor
 
-            elif event["type"] == "capacity_increase":
+            elif etype == "capacity_increase":
                 for n in nodes.values():
                     if n.get("cluster") == event.get("cluster"):
                         n["capacity"] *= effective_factor
 
-            elif event["type"] == "coupling_shift":
+            elif etype == "coupling_shift":
                 for e in edges:
-                    e["strength"] *= min(1.0, effective_factor + 0.02)
+                    e["strength"] = min(1.0, e["strength"] * effective_factor)
 
-            elif event["type"] == "uncertainty_shock":
+            elif etype == "uncertainty_shock":
                 for n in nodes.values():
-                    n["stress"] *= effective_factor
+                    n["stress"] = n.get("stress", 0) * effective_factor
 
-            elif event["type"] == "variability_shock":
+            elif etype == "variability_shock":
                 for n in nodes.values():
                     if n["type"] == "producer":
                         n["supply"] *= (1 + random.uniform(-0.1, 0.1))
 
+            elif etype == "alliance_shift":
+                c1 = event.get("source_cluster")
+                c2 = event.get("target_cluster")
+                delta = event.get("affinity_delta", 0.0) * intensity
+                if c1 and c2:
+                    key = tuple(sorted((c1, c2)))
+                    affinity_state[key] = affinity_state.get(key, 0.0) + delta * 0.05
+                    # Cap affinity shift
+                    affinity_state[key] = max(-0.8, min(0.8, affinity_state[key]))
+
         # ------------------------------------------
-        # GLOBAL EVENT STRESS BOOST (capped)
+        # GLOBAL EVENT STRESS BOOST
         # ------------------------------------------
         active_intensity = 0.0
 
         for event in EVENTS:
-
             event_step = event.get("step")
-
             if "month" in event and month_to_step:
-                event_month = event["month"]
-                if event_month not in month_to_step:
+                if event["month"] not in month_to_step:
                     continue
-                event_step = month_to_step[event_month]
+                event_step = month_to_step[event["month"]]
 
             duration = event.get("duration", 1)
             plateau = event.get("plateau", 0)
-            decay = event.get("decay", 0.5)
+            decay_rate = event.get("decay", 0.5)
 
             if step < event_step or step >= event_step + duration:
                 continue
 
             relative_t = step - event_step
-
-            if relative_t < plateau:
-                intensity = 1.0
-            else:
-                intensity = math.exp(-decay * (relative_t - plateau))
-
+            intensity = 1.0 if relative_t < plateau else math.exp(-decay_rate * (relative_t - plateau))
             active_intensity += intensity
 
-        # Hard cap on stress boost per tick
         if active_intensity > 0:
             for n in nodes.values():
                 if n["status"] != "failed":
-                    boost = min(10.0, 2.0 * active_intensity)
+                    boost = min(3.0, 0.8 * active_intensity)
                     n["stress"] = n.get("stress", 0) + boost
 
         # ------------------------------------------
@@ -179,40 +367,28 @@ def run_energy_simulation(nodes, edges, steps=10, month_to_step=None):
             G.add_node(node_id, **node_data)
 
         for e in edges:
-
             if e["status"] == "failed":
                 continue
-
-            u = e["source"]
-            v = e["target"]
-
-            if nodes[u]["status"] == "failed" or nodes[v]["status"] == "failed":
+            u, v = e["source"], e["target"]
+            # Failed producers/transit nodes are excluded
+            # Failed consumers stay in graph to receive partial flow (enables recovery)
+            u_failed = nodes[u]["status"] == "failed" and nodes[u]["type"] != "consumer"
+            v_failed = nodes[v]["status"] == "failed" and nodes[v]["type"] != "consumer"
+            if u_failed or v_failed:
                 continue
-
             G.add_edge(u, v)
             edge_map[(u, v)] = e
             edge_map[(v, u)] = e
 
         # ------------------------------------------
-        # PRODUCERS / CONSUMERS
-        # ------------------------------------------
-        producers = [
-            n for n in nodes
-            if nodes[n]["type"] == "producer" and nodes[n]["status"] != "failed"
-        ]
-
-        consumers = [
-            n for n in nodes
-            if nodes[n]["type"] == "consumer" and nodes[n]["status"] != "failed"
-        ]
-
-        # ------------------------------------------
         # MARKET LOGIC
         # ------------------------------------------
+        producers = [n for n in nodes if nodes[n]["type"] == "producer" and nodes[n]["status"] != "failed"]
+        # All consumers (including failed) can receive flow
+        consumers = [n for n in nodes if nodes[n]["type"] == "consumer"]
+
         for consumer in consumers:
-
             demand = nodes[consumer]["demand"]
-
             if demand <= 0:
                 continue
 
@@ -220,30 +396,24 @@ def run_energy_simulation(nodes, edges, steps=10, month_to_step=None):
             best_score = 0
 
             for producer in producers:
-
                 try:
                     paths = list(nx.all_simple_paths(G, producer, consumer, cutoff=4))
                 except Exception:
                     continue
 
                 for path in paths:
-
                     capacities = []
-
                     for i in range(len(path) - 1):
                         e = edge_map.get((path[i], path[i + 1]))
-
                         if not e or e["status"] == "failed":
                             capacities = []
                             break
-
                         capacities.append(e["capacity"] * e["strength"])
 
                     if not capacities:
                         continue
 
                     score = min(capacities)
-
                     if score > best_score:
                         best_score = score
                         best_path = path
@@ -253,7 +423,6 @@ def run_energy_simulation(nodes, edges, steps=10, month_to_step=None):
 
             producer = best_path[0]
             available = nodes[producer]["supply"]
-
             flow = min(demand, available, best_score)
 
             if flow <= 0:
@@ -273,69 +442,50 @@ def run_energy_simulation(nodes, edges, steps=10, month_to_step=None):
         # EDGE DYNAMICS
         # ------------------------------------------
         for e in edges:
-
             if e["status"] == "failed":
                 continue
 
             flow = e["flow"]
             capacity = e["capacity"]
-
             if capacity <= 0:
                 continue
 
             flow_ratio = (flow / capacity) * e["strength"]
 
-            # Hard overload → failure
             if flow_ratio > 1.5:
                 e["status"] = "failed"
                 e["strength"] = max(0.1, e["strength"] * 0.2)
-
-            # High load → structural weakening
             elif flow_ratio > 1.0:
                 e["strength"] = max(0.2, e["strength"] * 0.7)
-
             elif flow_ratio > 0.7:
                 e["strength"] = max(0.4, e["strength"] * 0.85)
-
-            # Low load → recovery
             else:
                 e["strength"] = min(1.0, e["strength"] * 1.02)
 
         # ------------------------------------------
-        # EDGE RECOVERY (stress-dependent probability)
+        # EDGE RECOVERY
         # ------------------------------------------
         for e in edges:
-
             if e["status"] != "failed":
                 continue
-
-            u = e["source"]
-            v = e["target"]
-
+            u, v = e["source"], e["target"]
             if nodes[u]["status"] == "failed" or nodes[v]["status"] == "failed":
                 continue
-
             avg_stress = (nodes[u].get("stress", 0) + nodes[v].get("stress", 0)) / 2.0
             recovery_prob = max(0.02, 0.2 * math.exp(-avg_stress / 30.0))
-
             if random.random() < recovery_prob:
                 e["status"] = "active"
                 e["strength"] = 0.3
 
-        # ------------------------------------------
-        # Rebuild graph after edge recovery
-        # ------------------------------------------
+        # Rebuild graph after recovery
         G = nx.Graph()
         edge_map = {}
-
         for node_id, node_data in nodes.items():
             G.add_node(node_id, **node_data)
-
         for e in edges:
             if e["status"] == "failed":
                 continue
-            u = e["source"]
-            v = e["target"]
+            u, v = e["source"], e["target"]
             if nodes[u]["status"] == "failed" or nodes[v]["status"] == "failed":
                 continue
             G.add_edge(u, v)
@@ -351,75 +501,75 @@ def run_energy_simulation(nodes, edges, steps=10, month_to_step=None):
         if active_nodes > 0 and active_edges < active_nodes * 0.3:
             for e in edges:
                 if e["status"] == "failed":
-                    u = e["source"]
-                    v = e["target"]
+                    u, v = e["source"], e["target"]
                     if nodes[u]["status"] != "failed" or nodes[v]["status"] != "failed":
                         e["status"] = "active"
                         e["strength"] = 0.2
 
         # ------------------------------------------
+        # MARKET STRESS – computed after flow is settled
+        # ------------------------------------------
+        market_stress = compute_market_stress(nodes)
+
+        # ------------------------------------------
         # STRESS PROPAGATION
         # ------------------------------------------
-
-        # Phase 1: External stress (undersupply)
         for node_id, n in nodes.items():
-
             if n["status"] == "failed":
-                n["stress"] = 100.0
+                # Gradual cooldown for failed nodes – enables recovery
+                n["stress"] = n.get("stress", 100.0) * 0.85
                 continue
-
             external_stress = max(0.0, n["demand"] - n["received"])
             n["stress"] = 0.7 * n.get("stress", 0) + external_stress
 
-        # Phase 2: Stress propagation through neighbors
-        for node_id, n in nodes.items():
+            # Market stress feedback (applied after flow is known)
+            c = n.get("cluster", "default")
+            ms = market_stress.get(c, 0.0)
+            if n["type"] == "consumer":
+                n["stress"] += ms * 2.0
+            elif n["type"] == "producer":
+                n["stress"] = max(0.0, n["stress"] - ms * 0.5)
 
+        for node_id, n in nodes.items():
             if n["status"] == "failed":
                 continue
-
             neighbors = list(G.neighbors(node_id))
-
             if not neighbors:
                 continue
-
             neighbor_stress = sum(nodes[nb]["stress"] for nb in neighbors) / len(neighbors)
-            propagated = 0.3 * neighbor_stress
-            n["stress"] += propagated
+            n["stress"] += 0.15 * neighbor_stress  # reduced propagation factor
 
         # ------------------------------------------
-        # NODE FAILURE
+        # NODE FAILURE & RECOVERY
         # ------------------------------------------
         for n in nodes.values():
-
             if n["status"] == "failed":
                 continue
-
-            if n["stress"] > 60:
+            if n["stress"] > 80:
                 n["status"] = "failed"
-
-            elif n["stress"] > 30:
+            elif n["stress"] > 50:
                 n["supply"] *= 0.7
-
-            elif n["stress"] > 15:
+            elif n["stress"] > 25:
                 n["supply"] *= 0.9
 
-        # ------------------------------------------
-        # NODE RECOVERY
-        # ------------------------------------------
         for node_id, n in nodes.items():
-
             if n["status"] != "failed":
                 continue
-
             current_stress = n.get("stress", 100.0)
-
-            if current_stress < 20.0:
-                recovery_prob = 0.15 * math.exp(-current_stress / 20.0)
-
+            if current_stress < 35.0:
+                recovery_prob = 0.2 * math.exp(-current_stress / 35.0)
                 if random.random() < recovery_prob:
                     n["status"] = "active"
-                    n["supply"] = n.get("initial_supply", 1.0) * 0.3
-                    n["stress"] = 15.0
+                    n["supply"] = n.get("initial_supply", 1.0) * 0.4
+                    n["stress"] = 20.0
+
+        # ------------------------------------------
+        # DYNAMIC LAYOUT (affinity-driven, cluster-anchored)
+        # ------------------------------------------
+        cluster_anchors = get_cluster_strengths(nodes, edges)
+        affinity = build_affinity_matrix(nodes, edges, affinity_state)
+        pos = compute_dynamic_layout(G, nodes, affinity, cluster_anchors, pos_prev)
+        pos_prev = pos
 
         # ------------------------------------------
         # SYSTEM HEALTH
@@ -430,13 +580,9 @@ def run_energy_simulation(nodes, edges, steps=10, month_to_step=None):
         # EDGE STATE SNAPSHOT
         # ------------------------------------------
         edge_state = {}
-
         for e in edges:
-            u = e["source"]
-            v = e["target"]
-
+            u, v = e["source"], e["target"]
             key = tuple(sorted((u, v)))
-
             flow = e.get("flow", 0.0)
             capacity = e.get("capacity", 1.0)
             status = e.get("status", "active")
@@ -451,6 +597,30 @@ def run_energy_simulation(nodes, edges, steps=10, month_to_step=None):
                 edge_state[key] = "new"
 
         # ------------------------------------------
+        # LOGGING
+        # ------------------------------------------
+        active_nodes_count = sum(1 for n in nodes.values() if n["status"] != "failed")
+        active_edges_count = sum(1 for e in edges if e["status"] == "active")
+        failed_nodes = [nid for nid, n in nodes.items() if n["status"] == "failed"]
+        avg_stress = sum(n.get("stress", 0) for n in nodes.values() if n["status"] != "failed") / max(active_nodes_count, 1)
+        ms_summary = ", ".join(f"{c}={v:.2f}" for c, v in sorted(market_stress.items()) if v > 0.01)
+        active_event_names = []
+        for event in EVENTS:
+            if "month" not in event or event["month"] not in (month_to_step or {}):
+                continue
+            es = month_to_step[event["month"]]
+            if step >= es and step < es + event.get("duration", 1):
+                active_event_names.append(event["name"])
+
+        log.info(
+            f"STEP {step:02d} | {list(month_to_step.keys())[step] if month_to_step and step < len(month_to_step) else '?':8s} | "
+            f"health={system_health:.3f} | nodes={active_nodes_count:02d}/{len(nodes)} | edges={active_edges_count:02d} | "
+            f"avg_stress={avg_stress:5.1f} | market=[{ms_summary}] | "
+            f"failed={failed_nodes if failed_nodes else '-'} | "
+            f"events={active_event_names if active_event_names else '-'}"
+        )
+
+        # ------------------------------------------
         # SNAPSHOT
         # ------------------------------------------
         history.append({
@@ -458,7 +628,11 @@ def run_energy_simulation(nodes, edges, steps=10, month_to_step=None):
             "nodes": {k: v.copy() for k, v in nodes.items()},
             "edges": edge_state,
             "system_health": system_health,
-            "load": {k: nodes[k]["stress"] for k in nodes}
+            "load": {k: nodes[k]["stress"] for k in nodes},
+            "pos": dict(pos),
+            "cluster_anchors": dict(cluster_anchors),
+            "market_stress": dict(market_stress),
+            "affinity_state": dict(affinity_state),
         })
 
     return history

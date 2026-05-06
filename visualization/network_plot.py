@@ -1,9 +1,11 @@
 import networkx as nx
 import plotly.graph_objects as go
 import streamlit as st
+import math
 
 
-def plot_network(G, node_load, edge_state, highlight_nodes=None, highlight_edges=None):
+def plot_network(G, node_load, edge_state, highlight_nodes=None, highlight_edges=None,
+                 pos=None, cluster_anchors=None):
 
     # ------------------------------------------
     # Fallbacks
@@ -20,18 +22,24 @@ def plot_network(G, node_load, edge_state, highlight_nodes=None, highlight_edges
     if highlight_edges is None:
         highlight_edges = set()
 
+    if cluster_anchors is None:
+        cluster_anchors = {}
+
+    anchor_nodes = set(cluster_anchors.values())
+
     # ------------------------------------------
-    # Reuse layout if node set is unchanged
+    # Layout: use pre-computed dynamic pos if available,
+    # otherwise fall back to cached spring layout
     # ------------------------------------------
-    nodes_key = tuple(sorted(G.nodes()))
-
-    if "pos_cache" not in st.session_state:
-        st.session_state["pos_cache"] = {}
-
-    if nodes_key not in st.session_state["pos_cache"]:
-        st.session_state["pos_cache"][nodes_key] = nx.spring_layout(G, seed=42, k=0.3)
-
-    pos = st.session_state["pos_cache"][nodes_key]
+    if pos and len(pos) > 0:
+        layout = pos
+    else:
+        nodes_key = tuple(sorted(G.nodes()))
+        if "pos_cache" not in st.session_state:
+            st.session_state["pos_cache"] = {}
+        if nodes_key not in st.session_state["pos_cache"]:
+            st.session_state["pos_cache"][nodes_key] = nx.spring_layout(G, seed=42, k=0.3)
+        layout = st.session_state["pos_cache"][nodes_key]
 
     # ------------------------------------------
     # EDGES
@@ -40,29 +48,31 @@ def plot_network(G, node_load, edge_state, highlight_nodes=None, highlight_edges
 
     color_map = {
         "strong": "#aaaaaa",
-        "weak": "#ff3b3b",
-        "new": "#0077ff"
+        "weak":   "#ff3b3b",
+        "new":    "#0077ff"
     }
-
     width_map = {
-        "strong": 2.0,
-        "weak": 0.5,
-        "new": 4.5
+        "strong": 1.5,
+        "weak":   0.5,
+        "new":    3.0
     }
 
     for (u, v) in G.edges():
         key = tuple(sorted((u, v)))
         state = edge_state.get(key, "strong")
 
-        x0, y0 = pos[u]
-        x1, y1 = pos[v]
+        if u not in layout or v not in layout:
+            continue
+
+        x0, y0 = layout[u]
+        x1, y1 = layout[v]
 
         if key in highlight_edges:
             color = "#00cfff"
-            width = 4.5
+            width = 3.5
         else:
-            color = color_map[state]
-            width = width_map[state]
+            color = color_map.get(state, "#aaaaaa")
+            width = width_map.get(state, 1.5)
 
         edge_traces.append(go.Scatter(
             x=[x0, x1, None],
@@ -77,8 +87,8 @@ def plot_network(G, node_load, edge_state, highlight_nodes=None, highlight_edges
                 x=[x0, x1, None],
                 y=[y0, y1, None],
                 mode="lines",
-                line=dict(width=width_map[state] + 2, color="purple"),
-                opacity=0.6,
+                line=dict(width=width + 2, color="purple"),
+                opacity=0.5,
                 hoverinfo="none"
             ))
 
@@ -91,39 +101,62 @@ def plot_network(G, node_load, edge_state, highlight_nodes=None, highlight_edges
     has_capacity = len(capacity_values) > 0
     max_capacity = max(capacity_values) if has_capacity else 1
 
-    # Degree-based cluster detection for graphs without capacity attributes
+    # Degree fallback for basic scenario
     degrees = dict(G.degree())
     max_degree = max(degrees.values()) if degrees else 1
     degree_threshold = max_degree * 0.6
 
-    node_x, node_y, node_colors, node_sizes = [], [], [], []
+    # Node type for size bonus (hub > transit > producer > consumer)
+    type_bonus = {"hub": 1.4, "transit": 1.0, "producer": 1.1, "consumer": 0.9}
+
+    node_x, node_y, node_colors, node_sizes, node_text = [], [], [], [], []
 
     for node in G.nodes():
 
-        x, y = pos[node]
+        if node not in layout:
+            continue
+
+        x, y = layout[node]
         node_x.append(x)
         node_y.append(y)
 
+        is_anchor = node in anchor_nodes
+        is_isolated = (G.degree(node) == 0)
+        node_type = G.nodes[node].get("type", "unknown")
+        bonus = type_bonus.get(node_type, 1.0)
+
         if has_capacity:
-            # Energy scenario: size based on capacity
             capacity = G.nodes[node].get("capacity", 1.0) or 1.0
             norm_capacity = capacity / max_capacity if max_capacity > 0 else 0
-            size = 8 + (norm_capacity ** 1.5) * 30
-        else:
-            # Basic scenario: cluster nodes (high degree) larger, regular nodes smaller
-            degree = degrees.get(node, 0)
-            if degree >= degree_threshold:
-                size = 14
+            if is_anchor:
+                size = (16 + (norm_capacity ** 1.1) * 28) * bonus
             else:
-                size = 7
+                size = (6 + (norm_capacity ** 1.5) * 12) * bonus
+        else:
+            degree = degrees.get(node, 0)
+            size = (14 if degree >= degree_threshold else 7) * bonus
 
-        # Color based on load (with highlight override)
         load = node_load.get(node, 0.1)
         normalized_load = load / max_load if max_load > 0 else 0
+
+        # Hover text: node ID + type + cluster
+        cluster = G.nodes[node].get("cluster", "")
+        hover = f"{node}<br>{node_type} · {cluster}"
 
         if node in highlight_nodes:
             node_colors.append("purple")
             node_sizes.append(size * 1.5)
+        elif is_isolated:
+            node_colors.append("#aaaaaa")
+            node_sizes.append(max(4, size * 0.45))
+        elif is_anchor:
+            if normalized_load > 0.7:
+                node_colors.append("#ff3b3b")
+            elif normalized_load > 0.4:
+                node_colors.append("#ff9c3b")
+            else:
+                node_colors.append("#4fc3f7")
+            node_sizes.append(size)
         else:
             if normalized_load > 0.7:
                 node_colors.append("#ff3b3b")
@@ -133,11 +166,13 @@ def plot_network(G, node_load, edge_state, highlight_nodes=None, highlight_edges
                 node_colors.append("#6bd96b")
             node_sizes.append(size)
 
+        node_text.append(hover)
+
     node_trace = go.Scatter(
         x=node_x,
         y=node_y,
         mode="markers",
-        text=[str(n) for n in G.nodes()],
+        text=node_text,
         hoverinfo="text",
         marker=dict(
             size=node_sizes,

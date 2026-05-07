@@ -56,9 +56,9 @@ Thumbs.db
 # Data (wichtig!)
 # --------------------------------------
 data/
-*.csv
 *.parquet
 *.feather
+!data/*.csv
 
 # --------------------------------------
 # Temporary / cache
@@ -82,6 +82,7 @@ frames/
 
 # Allow demo GIF for showcase
 !assets/demo.gif
+!assets/demo_showcase.png
 
 # --------------------------------------
 # Test artifacts

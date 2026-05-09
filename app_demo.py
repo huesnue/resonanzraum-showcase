@@ -627,20 +627,28 @@ elif scenario["type"] == "pandemic":
         def _load_edges():
             return load_pandemic(path=selected_path)["edges"]
 
-        with st.spinner(f"Running ensemble (50 simulations)…"):
-            ensemble = run_ensemble(
-                load_nodes_fn=_load_nodes,
-                load_edges_fn=_load_edges,
-                run_simulation_fn=run_pandemic_simulation,
-                get_events_fn=get_pandemic_events,
-                stochastic_params=params,
-                path_name=selected_path,
-                steps=PANDEMIC_STEPS,
-                month_to_step=PANDEMIC_MONTH_TO_STEP,
-                projection_start_month=PROJECTION_START,
-                month_labels=PANDEMIC_MONTHS,
-                n_runs=50,
-            )
+        path_label = {"resilient":"🟢 Resilient","drifting":"🟡 Drifting","cascade":"🔴 Cascade"}.get(selected_path, selected_path)
+        progress_bar = st.progress(0, text=f"Running ensemble — {path_label} — 0 / 50")
+
+        def _update_progress(pct, done, total):
+            # pct ist bereits float [0.0, 1.0], von ensemble_runner berechnet
+            progress_bar.progress(pct, text=f"Running ensemble — {path_label} — {done} / {total}")
+
+        ensemble = run_ensemble(
+            load_nodes_fn=_load_nodes,
+            load_edges_fn=_load_edges,
+            run_simulation_fn=run_pandemic_simulation,
+            get_events_fn=get_pandemic_events,
+            stochastic_params=params,
+            path_name=selected_path,
+            steps=PANDEMIC_STEPS,
+            month_to_step=PANDEMIC_MONTH_TO_STEP,
+            projection_start_month=PROJECTION_START,
+            month_labels=PANDEMIC_MONTHS,
+            n_runs=50,
+            progress_callback=_update_progress,
+        )
+        progress_bar.empty()
 
         st.session_state[ensemble_key] = ensemble
         st.session_state[history_key]  = ensemble["median_history"]

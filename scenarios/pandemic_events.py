@@ -819,7 +819,7 @@ STOCHASTIC_PARAMS = {
         # Mittlere Vorbereitung: Governance unklar, teilweise Vorräte,
         # verzögerte Reaktionsfähigkeit, Tracing-Lücken
         "initial_buffer":       0.50,
-        "initial_stress_acc":   3.0,    # moderate strukturelle Lücken
+        "initial_stress_acc":   1.2,    # moderate strukturelle Lücken
         "initial_econ_scale":   0.90,   # Gesundheitssystem unterfinanziert
         "initial_supply_scale": 0.88,   # Lücken bei Vorräten/Personal
         "initial_edge_scale":   0.92,   # Koordinationsdefizite
@@ -835,7 +835,7 @@ STOCHASTIC_PARAMS = {
         # Compliance niedrig, Governance fragmentiert,
         # kein institutionelles Lernen aus Vorpandemien
         "initial_buffer":       0.28,
-        "initial_stress_acc":   8.0,    # erheblicher latenter Stress
+        "initial_stress_acc":   3.5,    # erheblicher latenter Stress
         "initial_econ_scale":   0.78,   # chronische Unterfinanzierung
         "initial_supply_scale": 0.72,   # keine Reserven
         "initial_edge_scale":   0.82,   # fragmentierte Koordination

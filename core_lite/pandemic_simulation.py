@@ -381,12 +381,13 @@ def run_pandemic_simulation(
         for n in nodes.values():
             if n["status"] != "failed" and "initial_supply" in n:
                 cb = n.get("capacity_buffer", 0.60)
-                # Restore-Rate: direkt, nicht graduell
-                # Resilient (cb=0.80): 92% Restore pro Step
-                # Drifting  (cb=0.50): 80% Restore
-                # Cascade   (cb=0.28): 71% Restore
                 restore_rate = min(1.0, 0.60 + 0.40 * cb)
-                n["supply"] = n["initial_supply"] * restore_rate
+                raw_restored = n["initial_supply"] * restore_rate
+                # Mindestens: eigene Nachfrage + 20% Überschuss für Phase-2
+                # Sonst bleibt supply nach Phase-1 = 0 → kein Netzwerk-Routing
+                base_d = n.get("base_demand", 0.0)
+                min_supply = base_d * 1.20 if n["type"] in ("producer", "hub") else base_d
+                n["supply"] = max(raw_restored, min(n["initial_supply"], min_supply))
 
         # Demand-Reset auf unveränderlichen Ausgangswert
         for n in nodes.values():
@@ -622,21 +623,21 @@ def run_pandemic_simulation(
                 continue
 
             # shock_pressure: aus Event-Intensität + Cluster-Stress + Edge-Erosion
-            n["shock_pressure"] = min(1.0,
-                active_intensity * 0.12 +
-                avg_cluster_stress * 0.35 +
-                edge_erosion * 0.20
+            n["shock_pressure"] = min(0.85,
+                active_intensity * 0.10 +
+                avg_cluster_stress * 0.28 +
+                edge_erosion * 0.15
             )
 
             # capacity_buffer: erodiert durch shock_pressure, erholt sich langsam
             # Pfad-spezifisches Minimum: Resilient hält sich, Cascade fällt tiefer
             cb = n.get("capacity_buffer", 0.60)
             init_cb = n.get("initial_capacity_buffer", 0.60)
-            cb_min  = max(0.05, init_cb * 0.50)   # min = 50% des Startwerts
-            cb_max  = init_cb                       # max = Startwert
+            cb_min = max(0.05, init_cb * (0.50 + 0.10 * init_cb))
+            cb_max = min(1.0, init_cb * 1.05)
 
-            erosion_rate  = n["shock_pressure"] * 0.025
-            recovery_rate = max(0.0, (1.0 - n["shock_pressure"])) * (0.010 + init_cb * 0.008)
+            erosion_rate  = n["shock_pressure"] * 0.018
+            recovery_rate = max(0.0, (1.0 - n["shock_pressure"])) * (0.020 + init_cb * 0.015)
             cb = max(cb_min, min(cb_max, cb - erosion_rate + recovery_rate))
             n["capacity_buffer"] = cb
 
@@ -805,56 +806,71 @@ def run_pandemic_simulation(
                     edge_map[(u, v)] = e
                     edge_map[(v, u)] = e
 
-        # Konnektivitäts-Safeguard
-        active_edges = sum(1 for e in edges if e["status"] == "active")
-        active_nodes = sum(1 for n in nodes.values() if n["status"] != "failed")
-        if active_nodes > 0 and active_edges < active_nodes * 0.3:
+        # Fix E: Konnektivitätssafeguard — nur starke/ready Kanten zählen
+        # "new" Kanten (kein Fluss) sind strukturell vorhanden aber funktional schwach
+        total_edges = len(edges)
+        active_edges_count = sum(1 for e in edges if e["status"] == "active")
+        strong_edges = sum(1 for e in edges
+                          if e["status"] == "active"
+                          and e.get("strength", 0) >= 0.3)
+        # Schwelle: mindestens 40% der Knoten-Anzahl als echte Verbindungen
+        if active_edges_count < total_edges * 0.50:
             for e in edges:
                 if e["status"] == "failed":
                     u, v = e["source"], e["target"]
-                    if nodes[u]["status"] != "failed" or nodes[v]["status"] != "failed":
+                    u_low = nodes[u].get("stress", 999) < 60
+                    v_low = nodes[v].get("stress", 999) < 60
+                    if u_low or v_low:
                         e["status"] = "active"
-                        e["strength"] = 0.2
+                        e["strength"] = max(0.20, e.get("initial_strength", 0.5) * 0.30)
 
         # ------------------------------------------
         # STRESS PROPAGATION (SIR-inspiriert)
         # beta = Kopplungsstärke, gamma = Erholung
         # ------------------------------------------
         for node_id, n in nodes.items():
-            if n["status"] == "failed":
-                n["stress"] = n.get("stress", 100.0) * 0.85
-                continue
-
             cb = n.get("capacity_buffer", 0.60)
+
+            if n["status"] == "failed":
+                # Failed: intrinsischer Stress reduziert sich
+                n["stress"] = n.get("stress", 100.0) * 0.82
+                # Fix B: stress_accumulation bei failed Knoten aktiv abbauen
+                # → ermöglicht spätere Recovery
+                n["stress_accumulation"] = n.get("stress_accumulation", 0.0) * (0.88 + cb * 0.06)
+                continue
 
             # Lokaler Stress: ungedeckte Kapazitätsnachfrage
             external = max(0.0, n["demand"] - n["received"])
 
             # Stress-Decay: Resilient erholt sich schneller
-            # decay = 0.55 (cascade) .. 0.80 (resilient)
             stress_decay = 0.55 + 0.25 * cb
             n["stress"] = stress_decay * n.get("stress", 0.0) + external
 
-            # Kumulative Akkumulation: Cascade akkumuliert Resthress
-            # stress_accumulation wächst langsam, erodiert langsam
-            acc_growth = max(0.0, external) * (1.0 - cb) * 0.3
-            acc_decay  = cb * 0.05
-            n["stress_accumulation"] = max(0.0,
-                n.get("stress_accumulation", 0.0) + acc_growth - acc_decay
-            )
-            # Akkumulierter Stress wirkt zurück auf aktuelle Belastung
-            n["stress"] += n["stress_accumulation"] * 0.5
+            # Fix D: Stress-Akkumulation gedämpfter (0.15 statt 0.30)
+            # → verhindert permanente Blockierung der Recovery
+            base_d = max(1.0, n.get("base_demand", 1.0))
+            external_norm = max(0.0, external) / base_d
+            acc_growth = external_norm * (1.0 - cb) * 0.08
+            acc_decay  = cb * 0.06
+            sa_cap = 6.0 + (1.0 - cb) * 6.0
+            sa = n.get("stress_accumulation", 0.0)
+            n["stress_accumulation"] = max(0.0, min(sa_cap, sa + acc_growth - acc_decay))
+            # Fix A: sa wirkt NUR als Hintergrundrauschen, NICHT auf Recovery-Check
+            # Separate Variable für Recovery-Check
+            n["intrinsic_stress"] = n["stress"]   # vor sa-Beitrag
+            # sa beeinflusst sichtbaren Stress leicht (strukturelle Erosion)
+            n["stress"] += n["stress_accumulation"] * 0.20  # 0.20 statt 0.50
 
-            # Cluster-Stress-Feedback (verstärkt durch niedrigen CB)
+            # Cluster-Stress-Feedback
             c = n.get("cluster", "default")
             cs = cluster_stress.get(c, 0.0)
-            amplifier = 1.0 + (1.0 - cb) * 1.5
+            amplifier = 1.0 + (1.0 - cb) * 1.2
             if n["type"] == "consumer":
-                n["stress"] += cs * 2.0 * amplifier
+                n["stress"] += cs * 1.5 * amplifier
             elif n["type"] in ("producer", "hub"):
                 n["stress"] = max(0.0, n["stress"] - cs * 0.5)
 
-        # Nachbarschafts-Propagation: stärker bei niedrigem CB
+        # Nachbarschafts-Propagation: gedämpfter
         for node_id, n in nodes.items():
             if n["status"] == "failed":
                 continue
@@ -863,7 +879,7 @@ def run_pandemic_simulation(
             if not neighbors:
                 continue
             nb_stress = sum(nodes[nb]["stress"] for nb in neighbors) / len(neighbors)
-            propagation = 0.10 + (1.0 - cb) * 0.25
+            propagation = 0.08 + (1.0 - cb) * 0.18
             n["stress"] += propagation * nb_stress
 
         # Wirtschaftliche Stresswirkung: kumulativ, CB-abhängig
@@ -902,18 +918,21 @@ def run_pandemic_simulation(
             if n["status"] != "failed":
                 continue
             cb = n.get("capacity_buffer", 0.60)
-            stress = n.get("stress", 100.0)
-            # Resilient: erholt sich ab Stress < 40, schnell
-            # Cascade:   erholt sich erst ab Stress < 20, langsam
+            # Fix C: Recovery-Check auf intrinsic_stress (ohne sa-Beitrag)
+            # → sa blockiert nicht mehr die Recovery
+            intrinsic = n.get("intrinsic_stress", n.get("stress", 100.0))
+            sa = n.get("stress_accumulation", 0.0)
             recovery_threshold = 20.0 + 20.0 * cb
-            recovery_prob = (0.08 + 0.22 * cb) * math.exp(-stress / (30.0 + 10.0 * cb))
-            if stress < recovery_threshold and random.random() < recovery_prob:
+            recovery_prob = (0.10 + 0.25 * cb) * math.exp(-intrinsic / (25.0 + 15.0 * cb))
+            if intrinsic < recovery_threshold and random.random() < recovery_prob:
                 n["status"] = "active"
-                # Supply-Restore bei Recovery: auch buffer-abhängig
-                restore_frac = 0.30 + 0.30 * cb
-                n["supply"] = n.get("initial_supply", 1.0) * restore_frac
-                n["stress"] = recovery_threshold * 0.5
-                n["stress_accumulation"] *= (1.0 - cb * 0.5)
+                restore_frac = 0.55 + 0.30 * cb
+                restored_supply = max(base_d_rec * 0.80, n.get("initial_supply", 1.0) * restore_frac)
+                n["supply"] = restored_supply
+                n["stress"] = recovery_threshold * 0.4
+                n["intrinsic_stress"] = n["stress"]
+                # sa beim Recovery reduzieren
+                n["stress_accumulation"] = sa * max(0.05, 0.3 - cb * 0.25)
                 n["econ_output"] = n.get("initial_econ_output", 1.0) * restore_frac
 
         # ------------------------------------------

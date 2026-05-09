@@ -26,6 +26,7 @@ def run_ensemble(
     projection_start_month,
     month_labels,
     n_runs=50,
+    **kwargs,
 ):
     """
     n_runs Simulationen pro Pfad, Seeds variiert.
@@ -44,10 +45,12 @@ def run_ensemble(
     best_run    = None
     best_dist   = float("inf")
 
+    progress_callback = kwargs.get("progress_callback", None)
+
     for run_idx in range(n_runs):
         # Neuer Seed pro Run
         run_params = dict(stochastic_params)
-        run_params["seed"] = base_seed + run_idx * 17  # deterministisch, aber variiert
+        run_params["seed"] = base_seed + run_idx * 17
 
         nodes = load_nodes_fn()
         edges = load_edges_fn()
@@ -77,6 +80,11 @@ def run_ensemble(
         all_health.append(health_series)
         all_econ.append(econ_series)
         all_cb.append(cb_series)
+
+        if progress_callback:
+            # min(1.0) schützt vor Rundungsfehlern und failed Runs
+            pct = min(1.0, (run_idx + 1) / n_runs)
+            progress_callback(pct, run_idx + 1, n_runs)
 
     if not all_health:
         return None

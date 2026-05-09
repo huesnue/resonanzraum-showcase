@@ -12,25 +12,25 @@ This project demonstrates one core idea:
 
 > The difference between a stable and a failing system can be detected **before** failure happens.
 
-![Demo Screenshot](assets/demo_screenshot.png)
-
 ---
 
 ## 🔍 What this demo shows
 
-Three scenarios, one insight:
+Four scenarios, one insight:
 
 **Basic Demo** — Two network systems start identically. One remains stable under constant stress. One collapses under increasing pressure. The Early Warning signal diverges **months before** the Stability signal drops — making the coming failure visible long before it occurs.
 
-**Energy Crisis 2021–2026** — A simulated European energy supply network driven by 28 real-world geopolitical events: the Ukraine war, Nord Stream sabotage, LNG rerouting, the US-Israel strikes on Iran, the Strait of Hormuz closure, and more. Watch how shocks propagate through the network — and how structural signals respond **before** system health visibly collapses.
+**Energy Crisis 2021–2026** — A simulated European energy supply network driven by 28 real-world geopolitical events: the Ukraine war, Nord Stream sabotage, LNG rerouting, US-Israel strikes on Iran, the Strait of Hormuz closure, and more. Watch how shocks propagate through the network — and how structural signals respond **before** system health visibly collapses.
 
-**Pandemic 2020–2030** — A simulated European public health and economic network across 20 country nodes and 5 regional clusters. Phase 1 (2020–2024) reconstructs real events: COVID-19 waves, the Omicron shock, Mpox outbreaks, and the H5N1 escalation. Phase 2 (2025–2030) projects three structural pathways — Resilient, Drifting, and Cascade — driven by stochastic event generation and a Monte Carlo ensemble of 50 runs. A dual-layer signal tracks both health system capacity and economic output independently.
+**Pandemic 2020–2030** — A simulated European public health and economic network across 20 country nodes and 5 regional clusters. Phase 1 (2020–2024) reconstructs real events: COVID-19 waves, the Omicron shock, Mpox outbreaks, and the H5N1 escalation. Phase 2 (2025–2030) projects three structural pathways — Resilient, Drifting, and Cascade — driven by stochastic event generation and a Monte Carlo ensemble of 50 runs. A dual signal layer tracks health system capacity and economic output independently.
+
+**Eurozone Financial Stability 2020–2030** — A simulated European financial system stress-test demonstrator. This is not a forecast — it shows how a seemingly stable financial system can become structurally vulnerable through rising stress, declining buffers, sectoral interlinkages, and regional feedback loops. Two coupled spaces — a sector space (banks, funds, sovereigns, policy) and a regional space (countries) — interact through a cross-space bridge. Phase 1 (2020–2026) reconstructs historical stress events: COVID market shock, inflation surge, the rate hike cycle, banking stress 2023, CRE valuation pressure. Phase 2 (2026–2030) projects three structural pathways — Contained, Prolonged, and Systemic — with a Monte Carlo ensemble of 50 runs.
 
 The three pathways represent structurally different systems responding to the same external shock — not three possible futures, but three different inner architectures:
 
-- 🟢 **Resilient** — high shock absorption, early coordination, fast recovery
-- 🟡 **Drifting** — delayed response, gradual structural erosion, incomplete recovery
-- 🔴 **Cascade** — coupling failure under stress, progressive network breakdown
+- 🟢 **Contained / Resilient** — high shock absorption, early policy response, stable recovery
+- 🟡 **Prolonged / Drifting** — delayed policy mix, gradual structural erosion, incomplete recovery
+- 🔴 **Systemic / Cascade** — sovereign-bank nexus breaks, coupling failure, cascading instability
 
 ### Signals tracked
 
@@ -40,14 +40,10 @@ The three pathways represent structurally different systems responding to the sa
 | **Stability** | Current system health | Last — when it's already happening |
 | **Health Capacity** | Operational health system coverage | Dual-layer (Pandemic scenario) |
 | **Econ Output** | Economic capacity under stress | Dual-layer (Pandemic scenario) |
+| **Financial System Capacity** | Liquidity supply from sector space | Dual-layer (Financial scenario) |
+| **Economic Resilience** | Economic output of regional space | Dual-layer (Financial scenario) |
 
 Traditional monitoring only watches Stability. This demo shows why Early Warning matters — and why the spread between pathways is the signal, not just the level.
-
----
-
-## 📸 Demo
-
-> Screenshot above shows the Energy Crisis scenario at Feb 2022 — the Early Warning signal fired **10 months** before Stability visibly dropped.
 
 ---
 
@@ -71,7 +67,7 @@ At the moment where two systems still look identical on the surface, one is alre
 
 > Structural change precedes observable failure.
 
-This is not about predicting *that* a system will fail.  
+This is not about predicting *that* a system will fail.
 It is about detecting *when it starts to fail* — before anyone notices.
 
 ---
@@ -81,18 +77,25 @@ It is about detecting *when it starts to fail* — before anyone notices.
 This is a **simplified showcase version** — designed to illustrate behavior, not to expose the full model.
 
 ```
-core_lite/               # Lightweight simulation engine
-  simulation.py          # Basic network dynamics
-  energy_simulation.py   # Energy crisis simulation
-  pandemic_simulation.py # Pandemic dual-layer simulation
-  pandemic_ensemble.py   # Monte Carlo ensemble runner (N=50)
-scenarios/               # Scenario loaders and event timelines
+core_lite/                    # Lightweight simulation engine
+  simulation.py               # Basic network dynamics
+  energy_simulation.py        # Energy crisis simulation
+  pandemic_simulation.py      # Pandemic dual-layer simulation
+  pandemic_ensemble.py        # Pandemic Monte Carlo ensemble runner (N=50)
+  financial_simulation.py     # Financial stability dual-space simulation
+  financial_ensemble.py       # Financial Monte Carlo ensemble runner (N=50)
+scenarios/                    # Scenario loaders and event timelines
   basic.py
   energy.py / energy_events.py
   pandemic.py / pandemic_events.py
-visualization/           # Network plot with dynamic layout and legend
-data/                    # Node and edge definitions per scenario
-app_demo.py              # Streamlit app
+  financial.py / financial_events.py
+visualization/                # Network plot with dynamic layout and legend
+  network_plot.py             # Unified plot + context-aware legend
+data/                         # Node and edge definitions per scenario
+  nodes.csv / edges.csv                         # Basic / Energy
+  pandemic_nodes.csv / pandemic_edges.csv
+  financial_nodes.csv / financial_edges.csv
+app_demo.py                   # Streamlit app
 ```
 
 Key technical choices:
@@ -100,10 +103,12 @@ Key technical choices:
 - Cluster formation: anchor nodes gravitate to center, isolated nodes drift to periphery
 - Events: real-world timelines with supply shocks, alliance shifts, capacity changes
 - Pandemic projection: Poisson event generation + Beta-distributed intensities across three structural pathways
-- Monte Carlo ensemble: 50 runs per pathway with varying seeds → percentile bands (p10/p25/p50/p75/p90)
-- Dual-layer monitoring: health system capacity and economic output tracked and displayed independently
+- Financial simulation: two coupled spaces (sector + regional) connected via a cross-space bridge edge; type-dependent restore rates ensure structural routing flow
+- Monte Carlo ensemble: 50 runs per pathway with varying seeds → percentile bands (p10/p25/p50/p75/p90) for both Pandemic and Financial scenarios
+- Dual-layer monitoring: two independent signal layers per scenario tracked and displayed separately
 - Structural internals: `capacity_buffer`, `shock_pressure`, `stability_margin` computed per node per step
-- Signals: globally-normalized structural drift combining four erosion sources with automatic lead-time detection
+- Early Warning: globally-normalized structural drift combining four erosion sources with automatic lead-time detection; visualized as vline markers and shaded lead-time zones in the chart
+- Network legend: context-aware — adapts node labels, bridge entry, and metrics section to the active scenario
 
 ---
 
@@ -183,7 +188,7 @@ Dieses Projekt veranschaulicht einen zentralen Gedanken:
 
 ## 🔍 Was diese Demo zeigt
 
-Drei Szenarien, eine Erkenntnis:
+Vier Szenarien, eine Erkenntnis:
 
 **Basic Demo** — Zwei Netzwerksysteme starten identisch. Eines bleibt stabil unter konstantem Stress. Das andere kollabiert unter zunehmendem Druck. Das Early-Warning-Signal divergiert **Monate bevor** das Stabilitätssignal sinkt — die kommende Krise wird sichtbar, lange bevor sie eintritt.
 
@@ -191,11 +196,13 @@ Drei Szenarien, eine Erkenntnis:
 
 **Pandemie 2020–2030** — Ein simuliertes europäisches Gesundheits- und Wirtschaftsnetzwerk mit 20 Länderknoten und 5 regionalen Clustern. Phase 1 (2020–2024) rekonstruiert reale Ereignisse: COVID-19-Wellen, den Omikron-Schock, Mpox-Ausbrüche und die H5N1-Eskalation. Phase 2 (2025–2030) projiziert drei strukturelle Entwicklungspfade — Resilient, Drifting und Cascade — auf Basis stochastischer Ereignisgenerierung und eines Monte-Carlo-Ensembles mit 50 Runs. Ein dualer Signallayer beobachtet Gesundheitssystemkapazität und Wirtschaftsleistung separat.
 
+**Eurozone Finanzstabilität 2020–2030** — Ein simulierter Stress-Test-Demonstrator für das europäische Finanzsystem. Dies ist keine Prognose — das Szenario zeigt, wie ein scheinbar stabiles Finanzsystem durch steigenden Stress, sinkende Buffer, sektorale Verflechtungen und regionale Rückkopplungen strukturell instabil werden kann. Zwei gekoppelte Räume — ein Sektorraum (Banken, Fonds, Staatsanleihen, Policy) und ein Regionalraum (Länder) — stehen über eine Brückenkante in Wechselwirkung. Phase 1 (2020–2026) rekonstruiert historische Stressereignisse: COVID-Marktschock, Inflationsschub, Zinswende, Bankenstress 2023, CRE-Bewertungsdruck. Phase 2 (2026–2030) projiziert drei Strukturpfade — Contained, Prolonged und Systemic — mit einem Monte-Carlo-Ensemble von 50 Runs.
+
 Die drei Pfade beschreiben strukturell verschiedene Systeme unter demselben externen Schock — keine drei möglichen Zukünfte, sondern drei verschiedene innere Architekturen:
 
-- 🟢 **Resilient** — hohe Schockabsorption, frühe Koordination, schnelle Erholung
-- 🟡 **Drifting** — verzögerte Reaktion, graduelle strukturelle Erosion, unvollständige Erholung
-- 🔴 **Cascade** — Kopplungsversagen unter Stress, progressiver Netzwerkkollaps
+- 🟢 **Contained / Resilient** — hohe Schockabsorption, frühe Policy-Response, stabile Erholung
+- 🟡 **Prolonged / Drifting** — verzögerter Policy-Mix, graduelle strukturelle Erosion, unvollständige Erholung
+- 🔴 **Systemic / Cascade** — Sovereign-Bank-Nexus bricht, Kopplungsversagen, kaskadierende Instabilität
 
 ### Gemessene Signale
 
@@ -205,6 +212,8 @@ Die drei Pfade beschreiben strukturell verschiedene Systeme unter demselben exte
 | **Stability** | Aktueller Systemzustand | Zuletzt — wenn es bereits passiert |
 | **Health Capacity** | Operative Gesundheitsversorgung | Dual-Layer (Pandemie-Szenario) |
 | **Econ Output** | Wirtschaftliche Kapazität unter Stress | Dual-Layer (Pandemie-Szenario) |
+| **Financial System Capacity** | Liquiditätsversorgung aus dem Sektorraum | Dual-Layer (Finanz-Szenario) |
+| **Economic Resilience** | Wirtschaftliche Tragfähigkeit des Regionalraums | Dual-Layer (Finanz-Szenario) |
 
 Traditionelles Monitoring beobachtet nur Stability. Diese Demo zeigt, warum Early Warning entscheidend ist — und warum die Spreizung zwischen den Pfaden das eigentliche Signal ist, nicht das absolute Niveau.
 
@@ -230,7 +239,7 @@ In dem Moment, in dem zwei Systeme an der Oberfläche noch identisch aussehen, v
 
 > Strukturelle Veränderung geht dem beobachtbaren Scheitern voraus.
 
-Es geht nicht darum vorherzusagen, *dass* ein System scheitern wird.  
+Es geht nicht darum vorherzusagen, *dass* ein System scheitern wird.
 Es geht darum zu erkennen, *wann es beginnt zu scheitern* — bevor es jemand bemerkt.
 
 ---
@@ -240,18 +249,25 @@ Es geht darum zu erkennen, *wann es beginnt zu scheitern* — bevor es jemand be
 Dieses Repository enthält eine **vereinfachte Showcase-Version** — konzipiert, um Verhalten zu veranschaulichen, nicht um das vollständige Modell offenzulegen.
 
 ```
-core_lite/               # Leichtgewichtige Simulation
-  simulation.py          # Grundlegende Netzwerkdynamik
-  energy_simulation.py   # Energie-Simulation
-  pandemic_simulation.py # Pandemie Dual-Layer-Simulation
-  pandemic_ensemble.py   # Monte-Carlo-Ensemble-Runner (N=50)
-scenarios/               # Szenario-Loader und Event-Zeitlinien
+core_lite/                    # Leichtgewichtige Simulation
+  simulation.py               # Grundlegende Netzwerkdynamik
+  energy_simulation.py        # Energie-Simulation
+  pandemic_simulation.py      # Pandemie Dual-Layer-Simulation
+  pandemic_ensemble.py        # Pandemie Monte-Carlo-Ensemble-Runner (N=50)
+  financial_simulation.py     # Finanzstabilität Dual-Space-Simulation
+  financial_ensemble.py       # Finanz Monte-Carlo-Ensemble-Runner (N=50)
+scenarios/                    # Szenario-Loader und Event-Zeitlinien
   basic.py
   energy.py / energy_events.py
   pandemic.py / pandemic_events.py
-visualization/           # Netzwerk-Plot mit dynamischem Layout und Legende
-data/                    # Knoten- und Kantendefinitionen je Szenario
-app_demo.py              # Streamlit-App
+  financial.py / financial_events.py
+visualization/                # Netzwerk-Plot mit dynamischem Layout und Legende
+  network_plot.py             # Einheitlicher Plot + kontextbewusste Legende
+data/                         # Knoten- und Kantendefinitionen je Szenario
+  nodes.csv / edges.csv                         # Basic / Energy
+  pandemic_nodes.csv / pandemic_edges.csv
+  financial_nodes.csv / financial_edges.csv
+app_demo.py                   # Streamlit-App
 ```
 
 Wesentliche technische Entscheidungen:
@@ -259,10 +275,12 @@ Wesentliche technische Entscheidungen:
 - Clusterbildung: Anker-Knoten gravitieren zur Mitte, isolierte Knoten driften an den Rand
 - Events: reale Zeitlinien mit Angebotsschocks, Bündnisverschiebungen und Kapazitätsänderungen
 - Pandemie-Projektion: Poisson-Ereignisgenerierung + Beta-verteilte Intensitäten über drei Strukturpfade
-- Monte-Carlo-Ensemble: 50 Runs pro Pfad mit variierenden Seeds → Perzentil-Bänder (p10/p25/p50/p75/p90)
-- Dual-Layer-Monitoring: Gesundheitskapazität und Wirtschaftsleistung separat erfasst und dargestellt
+- Finanz-Simulation: zwei gekoppelte Räume (Sektor + Regional) verbunden über eine Brückenkante; typabhängige Restore-Raten erzeugen strukturellen Routing-Flow
+- Monte-Carlo-Ensemble: 50 Runs pro Pfad mit variierenden Seeds → Perzentil-Bänder (p10/p25/p50/p75/p90) für Pandemie und Financial
+- Dual-Layer-Monitoring: zwei unabhängige Signalschichten pro Szenario, separat erfasst und dargestellt
 - Strukturelle Interna: `capacity_buffer`, `shock_pressure`, `stability_margin` pro Knoten und Schritt
-- Signale: global normierter struktureller Drift aus vier Erosionsquellen mit automatischer Vorlaufzeit-Erkennung
+- Frühwarnung: global normierter struktureller Drift aus vier Erosionsquellen mit automatischer Vorlaufzeit-Erkennung; im Chart als vline-Marker und schattierte Vorlaufzonen visualisiert
+- Netzwerk-Legende: kontextbewusst — passt Knotenbezeichnungen, Bridge-Eintrag und Metriken-Abschnitt automatisch an das aktive Szenario an
 
 ---
 

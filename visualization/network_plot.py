@@ -76,14 +76,9 @@ def plot_network(G, node_load, edge_state, highlight_nodes=None, highlight_edges
         x0, y0 = layout[u]
         x1, y1 = layout[v]
 
-        if key in highlight_edges:
-            color = "#00cfff"
-            width = 3.5
-        else:
-            color = color_map.get(state, "#aaaaaa")
-            width = width_map.get(state, 1.5)
-
-        dash = "dash" if state == "bridge_active" else None
+        color = color_map.get(state, "#aaaaaa")
+        width = width_map.get(state, 1.5)
+        dash  = "dash" if state == "bridge_active" else None
 
         edge_traces.append(go.Scatter(
             x=[x0, x1, None],
@@ -92,16 +87,6 @@ def plot_network(G, node_load, edge_state, highlight_nodes=None, highlight_edges
             line=dict(width=width, color=color, dash=dash),
             hoverinfo="none"
         ))
-
-        if key in highlight_edges:
-            edge_traces.append(go.Scatter(
-                x=[x0, x1, None],
-                y=[y0, y1, None],
-                mode="lines",
-                line=dict(width=width + 2, color="purple"),
-                opacity=0.5,
-                hoverinfo="none"
-            ))
 
     # ------------------------------------------
     # NODES
@@ -141,12 +126,12 @@ def plot_network(G, node_load, edge_state, highlight_nodes=None, highlight_edges
             capacity = G.nodes[node].get("capacity", 1.0) or 1.0
             norm_capacity = capacity / max_capacity if max_capacity > 0 else 0
             if is_anchor:
-                size = (16 + (norm_capacity ** 1.1) * 28) * bonus
+                size = min(36, (14 + (norm_capacity ** 1.1) * 18) * bonus)
             else:
-                size = (6 + (norm_capacity ** 1.5) * 12) * bonus
+                size = min(22, (5 + (norm_capacity ** 1.5) * 10) * bonus)
         else:
             degree = degrees.get(node, 0)
-            size = (14 if degree >= degree_threshold else 7) * bonus
+            size = (12 if degree >= degree_threshold else 7) * bonus
 
         load = node_load.get(node, 0.1)
         normalized_load = load / max_load if max_load > 0 else 0
@@ -157,10 +142,10 @@ def plot_network(G, node_load, edge_state, highlight_nodes=None, highlight_edges
 
         if node in highlight_nodes:
             node_colors.append("#e879f9")
-            node_sizes.append(size * 1.3)
+            node_sizes.append(min(28, size * 1.2))
         elif is_isolated:
             node_colors.append("#aaaaaa")
-            node_sizes.append(max(4, size * 0.45))
+            node_sizes.append(max(4, min(8, size * 0.45)))
         elif is_anchor:
             if normalized_load > 0.7:
                 node_colors.append("#ff3b3b")
@@ -208,32 +193,61 @@ def plot_network(G, node_load, edge_state, highlight_nodes=None, highlight_edges
     fig.update_layout(
         showlegend=False,
         margin=dict(l=0, r=0, t=20, b=0),
-        xaxis=dict(showgrid=False, zeroline=False, visible=False),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(showgrid=False, zeroline=False, visible=False,
+                   scaleanchor="y", scaleratio=1),
         yaxis=dict(showgrid=False, zeroline=False, visible=False),
     )
 
     return fig
 
 
-def network_legend_html():
+def network_legend_html(spaces=None, has_bridge=False, metrics=None):
     """
-    HTML-Legende für st.markdown — zwei Spalten: Nodes / Connections.
-    Wird direkt unter dem Network-Plot gerendert.
+    Datengetriebene Legende — passt sich automatisch an den Snapshot an.
+
+    Parameter:
+      spaces     : Liste aktiver Space-Typen im Graph, z.B. ["sector", "regional"]
+                   None oder [] → generische Knotenfarben ohne Space-Labels
+      has_bridge : True wenn Bridge-Kanten im Graph vorhanden sind
+      metrics    : Liste von (symbol, color, label, description) für den
+                   Metrics-Abschnitt. None → kein Metrics-Abschnitt.
+                   Beispiel Financial:
+                     [("●","#4fc3f7","Financial System Capacity","..."),
+                      ("■","#6bd96b","Economic Resilience","...")]
+                   Später Energy-Erweiterung:
+                     [("●","#4fc3f7","Energy Flow Capacity","..."),
+                      ("■","#6bd96b","Economic Resilience","...")]
     """
-    node_items = [
-        ("#4fc3f7", "● Sector node — low stress"),
-        ("#6bd96b", "■ Regional node — low stress"),
+    # Node-Einträge: Space-Labels nur wenn spaces übergeben
+    has_sector   = spaces and "sector"   in spaces
+    has_regional = spaces and "regional" in spaces
+
+    node_items = []
+    if has_sector:
+        node_items.append(("#4fc3f7", "● Sector node — low stress"))
+    if has_regional:
+        node_items.append(("#6bd96b", "■ Regional node — low stress"))
+    if not has_sector and not has_regional:
+        # Generisch: kein Space-Kontext
+        node_items.append(("#4fc3f7", "Hub / Anchor — low stress"))
+        node_items.append(("#6bd96b", "Node — low stress"))
+    node_items += [
         ("#ff9c3b", "Node — medium stress"),
         ("#ff3b3b", "Node — high stress / failed"),
         ("#e879f9", "Node — event active"),
         ("#aaaaaa", "Node — isolated"),
     ]
+
+    # Edge-Einträge: Bridge nur wenn vorhanden
     edge_items = [
-        ("#aaaaaa", "Connection with active flow"),
-        ("rgba(160,160,160,0.55)", "Connection available (no flow)"),
-        ("#ff3b3b", "Overloaded / failed connection"),
-        ("#b388ff", "Cross-space bridge (sector ↔ regional)"),
+        ("#aaaaaa",                  "Connection with active flow"),
+        ("rgba(160,160,160,0.55)",   "Connection available (no flow)"),
+        ("#ff3b3b",                  "Overloaded / failed connection"),
     ]
+    if has_bridge:
+        edge_items.append(("#b388ff", "Cross-space bridge (sector ↔ regional)"))
 
     def dot(color):
         return (f"<span style='display:inline-block;width:10px;height:10px;"
@@ -255,38 +269,35 @@ def network_legend_html():
                 f"text-transform:uppercase;letter-spacing:0.06em;"
                 f"margin-bottom:7px;margin-top:2px;'>{text}</div>")
 
-    nodes_html  = header("Nodes")  + "".join(row(dot,  c, l) for c, l in node_items)
-    edges_html  = header("Connections") + "".join(row(dash, c, l) for c, l in edge_items)
+    nodes_html = header("Nodes")       + "".join(row(dot,  c, l) for c, l in node_items)
+    edges_html = header("Connections") + "".join(row(dash, c, l) for c, l in edge_items)
 
-    metrics_items = [
-        ("●", "#4fc3f7", "Financial System Capacity",
-         "How well the financial sector (banks, funds, sovereigns) supplies liquidity."),
-        ("■", "#6bd96b", "Economic Resilience",
-         "Economic output and stability of countries / regions under stress."),
-    ]
+    columns = [nodes_html, edges_html]
 
-    def metric_row(symbol, color, label, desc):
-        sym_html = (
-            f"<span style='font-size:13px;color:{color};"
-            f"margin-right:7px;flex-shrink:0;line-height:1;'>{symbol}</span>"
+    # Metrics-Abschnitt: nur wenn Daten übergeben
+    if metrics:
+        def metric_row(symbol, color, label, desc):
+            sym_html = (
+                f"<span style='font-size:13px;color:{color};"
+                f"margin-right:7px;flex-shrink:0;line-height:1;'>{symbol}</span>"
+            )
+            return (
+                f"<div style='display:flex;align-items:flex-start;margin-bottom:6px;'>"
+                f"{sym_html}"
+                f"<span style='font-size:12px;color:#444;'>"
+                f"<strong>{label}</strong> — {desc}"
+                f"</span></div>"
+            )
+        metrics_html = header("Metrics") + "".join(
+            metric_row(sym, col, lbl, dsc) for sym, col, lbl, dsc in metrics
         )
-        return (
-            f"<div style='display:flex;align-items:flex-start;margin-bottom:6px;'>"
-            f"{sym_html}"
-            f"<span style='font-size:12px;color:#444;'>"
-            f"<strong>{label}</strong> — {desc}"
-            f"</span></div>"
-        )
+        columns.append(metrics_html)
 
-    metrics_html = header("Metrics") + "".join(
-        metric_row(sym, col, lbl, dsc) for sym, col, lbl, dsc in metrics_items
-    )
+    cols_html = "".join(f"<div>{c}</div>" for c in columns)
 
     return f"""<div style='display:flex;gap:32px;flex-wrap:wrap;
         padding:10px 14px 8px 14px;margin-top:4px;
         background:#f8f9fa;border-radius:8px;
         border:1px solid #e5e7eb;font-family:sans-serif;'>
-        <div>{nodes_html}</div>
-        <div>{edges_html}</div>
-        <div>{metrics_html}</div>
+        {cols_html}
     </div>"""

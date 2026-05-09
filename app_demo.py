@@ -7,6 +7,7 @@ from core_lite.pandemic_simulation import run_pandemic_simulation
 from core_lite.financial_simulation import run_financial_simulation
 from visualization.network_plot import plot_network, network_legend_html
 from core_lite.pandemic_ensemble import run_ensemble
+from core_lite.financial_ensemble import run_ensemble as run_financial_ensemble
 
 from scenarios.basic import load_scenario as load_basic
 from scenarios.energy import load_scenario as load_energy
@@ -77,7 +78,19 @@ def plot_series(data, title):
 # ------------------------------------------
 # UI CONFIG
 # ------------------------------------------
-st.set_page_config(layout="wide")
+st.set_page_config(
+    layout="wide",
+    page_title="Resonanzraum Showcase",
+    page_icon="assets/Logo_R2M.png",
+)
+
+# ------------------------------------------
+# SIDEBAR — Logo + Navigation
+# ------------------------------------------
+with st.sidebar:
+    st.image("assets/Logo_R2M.png", use_container_width=True)
+    st.caption("Structural instability detection across complex systems.")
+    st.divider()
 
 st.title("Why systems fail before they break")
 
@@ -104,10 +117,13 @@ if "step" not in st.session_state:
 # ------------------------------------------
 # SCENARIO SELECTION
 # ------------------------------------------
-scenario_name = st.selectbox(
-    "Select a scenario",
-    options=["Basic Demo", "Energy Crisis", "Pandemic 2020–2030", "Eurozone Financial Stability"]
-)
+with st.sidebar:
+    st.markdown("**Select a scenario**")
+    scenario_name = st.selectbox(
+        "Select a scenario",
+        options=["Basic Demo", "Energy Crisis", "Pandemic 2020–2030", "Eurozone Financial Stability"],
+        label_visibility="collapsed"
+    )
 
 if scenario_name == "Basic Demo":
     scenario = load_basic()
@@ -131,7 +147,10 @@ if st.session_state["last_scenario"] != scenario_name:
                 "pandemic_history_cascade",
                 "financial_history_contained",
                 "financial_history_prolonged",
-                "financial_history_systemic"]:
+                "financial_history_systemic",
+                "financial_ensemble_contained",
+                "financial_ensemble_prolonged",
+                "financial_ensemble_systemic"]:
         st.session_state.pop(key, None)
     st.session_state["last_scenario"] = scenario_name
     st.session_state["step"] = 0
@@ -362,7 +381,8 @@ elif scenario["type"] == "energy":
                 total_intensity += intensity
             event_intensity_series.append(total_intensity)
 
-        ctrl1, ctrl2, ctrl3, m1, m2, m3 = st.columns([1, 1, 2, 1, 1, 2])
+        # Controls: Play, Step, Slider in eigener Zeile
+        ctrl1, ctrl2, ctrl3 = st.columns([1, 1, 4])
         with ctrl1:
             if st.button("▶ Play", disabled=is_playing, width='stretch'):
                 st.session_state["mode"] = "playback"
@@ -385,6 +405,8 @@ elif scenario["type"] == "energy":
         current = history[st.session_state["step"]]
         current_month = MONTHS[st.session_state["step"]]
 
+        # Metriken: gleichbreite Spalten in eigener Zeile
+        m1, m2, m3, m4 = st.columns(4)
         with m1:
             st.metric("📅 Month", current_month)
         with m2:
@@ -407,6 +429,8 @@ elif scenario["type"] == "energy":
                     st.metric("⚡ Undersupply", "–")
             else:
                 st.metric("⚡ Undersupply", "–")
+        with m4:
+            _ew_en_placeholder = st.empty()
 
         health_series_pre = [h["system_health"] for h in history]
         n_pre = len(health_series_pre)
@@ -420,6 +444,23 @@ elif scenario["type"] == "energy":
         stab_pre = health_series_pre
 
         EW_THRESHOLD, STAB_THRESHOLD = 0.35, 0.6
+
+        # EW-Gauge befüllen
+        current_step_idx = st.session_state["step"]
+        _ew_en_now = ew_norm_pre[current_step_idx] if current_step_idx < len(ew_norm_pre) else 0.0
+        if _ew_en_now >= 0.60:
+            _ew_en_label, _ew_en_color, _ew_en_icon = "High", "#ff3b3b", "🔴"
+        elif _ew_en_now >= 0.35:
+            _ew_en_label, _ew_en_color, _ew_en_icon = "Elevated", "#f4a261", "🟡"
+        else:
+            _ew_en_label, _ew_en_color, _ew_en_icon = "Low", "#6bd96b", "🟢"
+        with _ew_en_placeholder:
+            st.metric(
+                label="Early Warning",
+                value=f"{_ew_en_icon} {_ew_en_label}",
+                delta=f"{_ew_en_now:.0%} structural signal",
+                delta_color="off",
+            )
 
         def find_all_ew_pairs(ew_norm, stab, ew_thr, stab_thr):
             pairs, open_pair, i = [], None, 1
@@ -484,7 +525,7 @@ elif scenario["type"] == "energy":
                 ew_norm.append(ew_smooth[i] / lm)
             stability_norm = health_series
 
-            all_pairs_chart, _ = find_all_ew_pairs(ew_norm, stability_norm, EW_THRESHOLD, STAB_THRESHOLD)
+            all_pairs_chart, open_pair_chart = find_all_ew_pairs(ew_norm, stability_norm, EW_THRESHOLD, STAB_THRESHOLD)
             tick_vals = list(range(0, n, 6))
             tick_text = [MONTHS[i] for i in tick_vals if i < len(MONTHS)]
             current_idx = st.session_state["step"]
@@ -556,10 +597,6 @@ elif scenario["type"] == "energy":
                     active_events.append(event)
 
             for event in active_events:
-                if event.get("target") == "pipeline":
-                    for edge_key in current["edges"]:
-                        u, v = edge_key
-                        highlight_edges.add(edge_key)
                 if "cluster" in event:
                     for node, data in current["nodes"].items():
                         if data.get("cluster") == event["cluster"]:
@@ -572,11 +609,39 @@ elif scenario["type"] == "energy":
                                 if data.get("cluster") == c:
                                     highlight_nodes.add(node)
 
+            # D: Netzwerk-State Banner
+            _en_ew_active = bool(open_pair_chart and open_pair_chart[0] <= current_step)
+            _en_ew_done   = bool(all_pairs_chart and all_pairs_chart[-1][1] is not None
+                                 and all_pairs_chart[-1][1] <= current_step
+                                 and current_step - all_pairs_chart[-1][1] <= 6)
+            _en_stab_drop = stab_pre[current_step] < STAB_THRESHOLD if current_step < len(stab_pre) else False
+            if _en_stab_drop:
+                _en_state = ("🔴 Instability confirmed",
+                             "background:rgba(255,59,59,0.12);border-left:3px solid #ff3b3b;")
+            elif _en_ew_active:
+                _en_state = ("🟡 Early Warning active — structural weakening detected",
+                             "background:rgba(244,162,97,0.12);border-left:3px solid #f4a261;")
+            elif _en_ew_done:
+                _en_state = ("💡 Early Warning preceded instability",
+                             "background:rgba(244,162,97,0.08);border-left:3px solid #f4a261;")
+            else:
+                _en_state = ("🟢 System stable — no structural warning",
+                             "background:rgba(107,217,107,0.10);border-left:3px solid #6bd96b;")
+            st.markdown(
+                f"<div style='{_en_state[1]}border-radius:0 6px 6px 0;"
+                f"padding:6px 12px;font-size:12px;font-weight:600;margin-bottom:6px;'>"
+                f"{_en_state[0]}</div>",
+                unsafe_allow_html=True)
+
             st.plotly_chart(plot_network(current["graph"], current["load"], current["edges"],
                                          highlight_nodes=highlight_nodes, highlight_edges=highlight_edges,
                                          pos=current.get("pos"), cluster_anchors=current.get("cluster_anchors")),
                             width='stretch')
-            st.markdown(network_legend_html(), unsafe_allow_html=True)
+            st.markdown(network_legend_html(
+                spaces=None,
+                has_bridge=False,
+                metrics=None,
+            ), unsafe_allow_html=True)
 
         if active_events:
             type_colors = {
@@ -718,21 +783,9 @@ elif scenario["type"] == "pandemic":
         is_proj     = current.get("is_projection", False)
 
         # ------------------------------------------
-        # Phase badge
+        # Metrics row (Phase-Badge als m1-Label)
         # ------------------------------------------
-        phase_badge = (
-            "<span style='background:#1E3A5F;color:#93C5FD;font-size:11px;font-weight:600;"
-            "padding:3px 10px;border-radius:12px;margin-left:8px;'>📡 PROJECTION</span>"
-            if is_proj else
-            "<span style='background:#14532D;color:#86EFAC;font-size:11px;font-weight:600;"
-            "padding:3px 10px;border-radius:12px;margin-left:8px;'>📂 HISTORICAL</span>"
-        )
-        st.markdown(f"**{current_month}** {phase_badge}", unsafe_allow_html=True)
-
-        # ------------------------------------------
-        # Metrics row
-        # ------------------------------------------
-        m1, m2, m3, m4 = st.columns(4)
+        m1, m2, m3, m4, m5 = st.columns(5)
         health_val = current["system_health"]
 
         # Dual-layer averages
@@ -741,10 +794,12 @@ elif scenario["type"] == "pandemic":
         avg_health = sum(hl.values()) / len(hl) if hl else health_val
         avg_econ   = sum(el.values()) / len(el) if el else health_val
 
-        m1.metric("📅 Month", current_month)
+        _phase_label = "📡 Projection" if is_proj else "📂 Historical"
+        m1.metric(_phase_label, current_month)
         m2.metric("System Health", f"{health_val:.0%}")
         m3.metric("🏥 Health Capacity", f"{avg_health:.0%}")
         m4.metric("📈 Econ Output", f"{avg_econ:.0%}")
+        _ew_placeholder = m5.empty()
 
         # ------------------------------------------
         # 4-STUFIGE FRÜHWARNARCHITEKTUR (R2M-konform, IP-sicher)
@@ -794,6 +849,22 @@ elif scenario["type"] == "pandemic":
         # Globale Normierung (nicht lokal)
         drift_max = max(structural_drift_smooth) if max(structural_drift_smooth) > 0 else 1.0
         ew_norm = [max(0.0, v / drift_max) for v in structural_drift_smooth]
+
+        # EW-Gauge befüllen
+        _ew_now = ew_norm[current_idx] if current_idx < len(ew_norm) else 0.0
+        if _ew_now >= 0.60:
+            _ew_label, _ew_color, _ew_icon = "High", "#ff3b3b", "🔴"
+        elif _ew_now >= 0.20:
+            _ew_label, _ew_color, _ew_icon = "Elevated", "#f4a261", "🟡"
+        else:
+            _ew_label, _ew_color, _ew_icon = "Low", "#6bd96b", "🟢"
+        with _ew_placeholder:
+            st.metric(
+                label="Early Warning",
+                value=f"{_ew_icon} {_ew_label}",
+                delta=f"{_ew_now:.0%} structural signal",
+                delta_color="off",
+            )
 
         # Stufe 1: gerichtete Schwächung über m=3 Schritte
         m1 = 3
@@ -1011,17 +1082,59 @@ elif scenario["type"] == "pandemic":
                     name="Early Warning (proj)", showlegend=False,
                     line=dict(color="#f4a261", width=1.4, dash="dot")))
 
-            # EW pair annotations
-            all_pairs_chart, _ = find_ew_pairs(ew_norm, stability_norm, L0_THR, STAB_THR)
+            # A+B: EW-Pair Annotations — vlines + vrect + Vorlauf-Zone
+            all_pairs_chart, open_pair_chart = find_ew_pairs(
+                ew_norm, stability_norm, L0_THR, STAB_THR)
+
             for pair_idx, (spike, drop, lead) in enumerate(all_pairs_chart[:3]):
+                if spike > current_idx:
+                    break
                 if lead <= 0:
                     continue
+                if drop <= current_idx:
+                    fig.add_vrect(
+                        x0=spike, x1=drop,
+                        fillcolor="rgba(244,162,97,0.10)", layer="below", line_width=0)
+                fig.add_vline(
+                    x=spike, line_width=1.5, line_dash="dot",
+                    line_color="rgba(244,162,97,0.85)",
+                    annotation_text="⚠ EW signal",
+                    annotation_position="top left",
+                    annotation_font_size=9, annotation_font_color="#f4a261")
+                if drop <= current_idx:
+                    fig.add_vline(
+                        x=drop, line_width=1.5, line_dash="dot",
+                        line_color="rgba(255,59,59,0.85)",
+                        annotation_text="↓ Instability",
+                        annotation_position="top right",
+                        annotation_font_size=9, annotation_font_color="#ff3b3b")
                 by = 0.97 - pair_idx * 0.07
-                fig.add_shape(type="line", x0=spike, x1=drop, y0=by, y1=by,
-                              line=dict(color="#888", width=1, dash="dot"))
-                fig.add_annotation(x=(spike+drop)//2, y=by+0.03,
-                                   text=f"{lead}mo ahead", showarrow=False,
-                                   font=dict(size=9, color="#aaaaaa"))
+                x_end = min(drop, current_idx)
+                fig.add_shape(type="line", x0=spike, x1=x_end, y0=by, y1=by,
+                              line=dict(color="#f4a261", width=1.2, dash="dot"))
+                fig.add_annotation(
+                    x=(spike + x_end) // 2, y=by + 0.035,
+                    text=f"⏱ {lead} months ahead" if drop <= current_idx else f"⏱ {current_idx - spike}mo so far",
+                    showarrow=False, font=dict(size=9, color="#f4a261"),
+                    bgcolor="rgba(0,0,0,0.35)", borderpad=2)
+
+            if open_pair_chart and open_pair_chart[0] <= current_idx:
+                ow_spike = open_pair_chart[0]
+                fig.add_vline(
+                    x=ow_spike, line_width=1.5, line_dash="dot",
+                    line_color="rgba(244,162,97,0.85)",
+                    annotation_text="⚠ EW signal",
+                    annotation_position="top left",
+                    annotation_font_size=9, annotation_font_color="#f4a261")
+                fig.add_vrect(
+                    x0=ow_spike, x1=current_idx,
+                    fillcolor="rgba(244,162,97,0.07)", layer="below", line_width=0)
+                steps_open = current_idx - ow_spike
+                fig.add_annotation(
+                    x=(ow_spike + current_idx) // 2, y=0.97,
+                    text=f"⏱ {steps_open}mo — no drop yet",
+                    showarrow=False, font=dict(size=9, color="#f4a261"),
+                    bgcolor="rgba(0,0,0,0.35)", borderpad=2)
 
             # Current step marker
             fig.add_vline(x=current_idx, line_width=1.5, line_dash="dash",
@@ -1073,6 +1186,32 @@ elif scenario["type"] == "pandemic":
                                 if data.get("cluster") == c:
                                     highlight_nodes.add(node)
 
+            # D: Netzwerk-State Banner (open_pair_chart oben definiert)
+            _is_ew_active = bool(open_pair_chart and open_pair_chart[0] <= current_idx)
+            _is_ew_done   = bool(all_pairs_chart and all_pairs_chart[-1][1] is not None
+                                 and all_pairs_chart[-1][1] <= current_idx
+                                 and current_idx - all_pairs_chart[-1][1] <= 8)
+            _stab_dropped = stability_norm[current_idx] < STAB_THR if current_idx < len(stability_norm) else False
+
+            if _stab_dropped:
+                _net_state = ("🔴 Instability confirmed",
+                              "background:rgba(255,59,59,0.12);border-left:3px solid #ff3b3b;")
+            elif _is_ew_active:
+                _net_state = ("🟡 Early Warning active — structural weakening detected",
+                              "background:rgba(244,162,97,0.12);border-left:3px solid #f4a261;")
+            elif _is_ew_done:
+                _net_state = ("💡 Early Warning preceded instability",
+                              "background:rgba(244,162,97,0.08);border-left:3px solid #f4a261;")
+            else:
+                _net_state = ("🟢 System stable — no structural warning",
+                              "background:rgba(107,217,107,0.10);border-left:3px solid #6bd96b;")
+
+            st.markdown(
+                f"<div style='{_net_state[1]}border-radius:0 6px 6px 0;"
+                f"padding:6px 12px;font-size:12px;font-weight:600;margin-bottom:6px;'>"
+                f"{_net_state[0]}</div>",
+                unsafe_allow_html=True)
+
             st.plotly_chart(
                 plot_network(current["graph"], current["load"], current["edges"],
                              highlight_nodes=highlight_nodes, highlight_edges=highlight_edges,
@@ -1099,7 +1238,11 @@ elif scenario["type"] == "pandemic":
                 st.markdown(pills_html, unsafe_allow_html=True)
 
             # Legende ganz unten in der rechten Spalte
-            st.markdown(network_legend_html(), unsafe_allow_html=True)
+            st.markdown(network_legend_html(
+                spaces=None,
+                has_bridge=False,
+                metrics=None,
+            ), unsafe_allow_html=True)
 
     pandemic_panel(history, max_step, proj_step, selected_path)
 
@@ -1110,7 +1253,7 @@ elif scenario["type"] == "pandemic":
 elif scenario["type"] == "financial":
 
     st.divider()
-    st.subheader("Eurozone Financial Stability Stress Scenario 2020–2035")
+    st.subheader("Eurozone Financial Stability Stress Scenario 2020–2030")
     st.caption(
         "This scenario is not a forecast. It is a structural stress-test demonstrator "
         "showing how sector and regional dynamics interact under financial stress."
@@ -1130,38 +1273,52 @@ elif scenario["type"] == "financial":
     selected_path  = path_options[selected_label]
     history_key    = f"financial_history_{selected_path}"
 
+    ensemble_key = f"financial_ensemble_{selected_path}"
+
     if run_clicked or history_key not in st.session_state:
-        sc     = load_financial(path=selected_path)
         params = FINANCIAL_STOCHASTIC_PARAMS[selected_path]
-        events = get_financial_events(selected_path)
+
+        def _load_fin_nodes():
+            return load_financial(path=selected_path)["nodes"]
+        def _load_fin_edges():
+            return load_financial(path=selected_path)["edges"]
 
         path_label = selected_label
-        progress_bar = st.progress(0, text=f"Running — {path_label} …")
+        progress_bar = st.progress(0, text=f"Running ensemble — {path_label} — 0 / 50")
 
-        history_raw = run_financial_simulation(
-            nodes=sc["nodes"],
-            edges=sc["edges"],
-            events=events,
+        def _update_fin_progress(pct, done, total):
+            progress_bar.progress(pct, text=f"Running ensemble — {path_label} — {done} / {total}")
+
+        ensemble = run_financial_ensemble(
+            load_nodes_fn=_load_fin_nodes,
+            load_edges_fn=_load_fin_edges,
+            run_simulation_fn=run_financial_simulation,
+            get_events_fn=get_financial_events,
+            stochastic_params=params,
+            path_name=selected_path,
             steps=FINANCIAL_STEPS,
             month_to_step=FINANCIAL_MONTH_TO_STEP,
-            stochastic_params=params,
             projection_start_month=FINANCIAL_PROJECTION_START,
             month_labels=FINANCIAL_MONTHS,
+            n_runs=50,
+            progress_callback=_update_fin_progress,
         )
         progress_bar.empty()
 
-        st.session_state[history_key] = history_raw
+        st.session_state[ensemble_key] = ensemble
+        st.session_state[history_key]  = ensemble["median_history"]
         st.session_state["step"] = 0
         st.session_state["mode"] = "manual"
 
-    history  = st.session_state[history_key]
-    max_step = len(history) - 1
+    ensemble  = st.session_state.get(ensemble_key)
+    history   = st.session_state[history_key]
+    max_step  = len(history) - 1
     proj_step = FINANCIAL_MONTH_TO_STEP.get(FINANCIAL_PROJECTION_START, max_step)
 
     run_every_f = 1.0 if st.session_state["mode"] == "playback" else None
 
     @st.fragment(run_every=run_every_f)
-    def financial_panel(history, max_step, proj_step, selected_path):
+    def financial_panel(history, max_step, proj_step, selected_path, ensemble=None):
 
         is_playing = st.session_state["mode"] == "playback"
         if is_playing:
@@ -1201,21 +1358,9 @@ elif scenario["type"] == "financial":
         is_proj     = current.get("is_projection", False)
 
         # ------------------------------------------
-        # Phase badge
+        # Metrics (Phase-Badge als m1-Label)
         # ------------------------------------------
-        phase_badge = (
-            "<span style='background:#1E3A5F;color:#93C5FD;font-size:11px;font-weight:600;"
-            "padding:3px 10px;border-radius:12px;margin-left:8px;'>📡 PROJECTION</span>"
-            if is_proj else
-            "<span style='background:#14532D;color:#86EFAC;font-size:11px;font-weight:600;"
-            "padding:3px 10px;border-radius:12px;margin-left:8px;'>📂 HISTORICAL</span>"
-        )
-        st.markdown(f"**{current_month}** {phase_badge}", unsafe_allow_html=True)
-
-        # ------------------------------------------
-        # Metrics
-        # ------------------------------------------
-        m1, m2, m3, m4 = st.columns(4)
+        m1, m2, m3, m4, m5 = st.columns(5)
         health_val = current["system_health"]
 
         sec_layer = current.get("sector_layer", {})
@@ -1223,10 +1368,14 @@ elif scenario["type"] == "financial":
         avg_sec = sum(sec_layer.values()) / len(sec_layer) if sec_layer else health_val
         avg_reg = sum(reg_layer.values()) / len(reg_layer) if reg_layer else health_val
 
-        m1.metric("📅 Month", current_month)
+        _phase_label = "📡 Projection" if is_proj else "📂 Historical"
+        m1.metric(_phase_label, current_month)
         m2.metric("System Health", f"{health_val:.0%}")
         m3.metric("🏦 Financial System Capacity", f"{avg_sec:.0%}")
         m4.metric("🌍 Economic Resilience", f"{avg_reg:.0%}")
+        # m5: EW-Level Gauge — live aus ew_norm bei current_idx
+        # (ew_norm wird weiter unten berechnet — Vorauswert hier schätzen)
+        _ew_placeholder = m5.empty()
 
 
         # ------------------------------------------
@@ -1262,6 +1411,22 @@ elif scenario["type"] == "financial":
 
         drift_max = max(structural_drift_smooth) if max(structural_drift_smooth) > 0 else 1.0
         ew_norm = [max(0.0, v / drift_max) for v in structural_drift_smooth]
+
+        # C: EW-Gauge jetzt befüllen (ew_norm verfügbar)
+        _ew_now = ew_norm[current_idx] if current_idx < len(ew_norm) else 0.0
+        if _ew_now >= 0.60:
+            _ew_label, _ew_color, _ew_icon = "High", "#ff3b3b", "🔴"
+        elif _ew_now >= 0.20:
+            _ew_label, _ew_color, _ew_icon = "Elevated", "#f4a261", "🟡"
+        else:
+            _ew_label, _ew_color, _ew_icon = "Low", "#6bd96b", "🟢"
+        with _ew_placeholder:
+            st.metric(
+                label="Early Warning",
+                value=f"{_ew_icon} {_ew_label}",
+                delta=f"{_ew_now:.0%} structural signal",
+                delta_color="off",
+            )
 
         m_l1 = 3
         level_1 = []
@@ -1388,7 +1553,41 @@ elif scenario["type"] == "financial":
                 x=xs_hist, y=hist_slice(stability_norm), mode="lines",
                 name="Stability (combined)",
                 line=dict(color="#4fc3f7", width=2.5)))
-            if xs_proj:
+            # Ensemble-Bänder in Projektionsphase
+            if xs_proj and ensemble:
+                hp = ensemble["health"]
+                proj_start_idx = FINANCIAL_MONTH_TO_STEP.get(FINANCIAL_PROJECTION_START, proj_step)
+                p90_proj = hp["p90"][proj_start_idx:visible_end]
+                p10_proj = hp["p10"][proj_start_idx:visible_end]
+                p75_proj = hp["p75"][proj_start_idx:visible_end]
+                p25_proj = hp["p25"][proj_start_idx:visible_end]
+                p50_proj = hp["p50"][proj_start_idx:visible_end]
+                if p90_proj:
+                    fig.add_trace(go.Scatter(
+                        x=xs_proj, y=p90_proj, mode="lines",
+                        name="p90", showlegend=False,
+                        line=dict(width=0),
+                        fillcolor="rgba(79,195,247,0.08)", fill="tonexty"))
+                    fig.add_trace(go.Scatter(
+                        x=xs_proj, y=p10_proj, mode="lines",
+                        name="p10–p90 band", showlegend=True,
+                        line=dict(width=0),
+                        fillcolor="rgba(79,195,247,0.08)", fill="tonexty"))
+                    fig.add_trace(go.Scatter(
+                        x=xs_proj, y=p75_proj, mode="lines",
+                        name="p75", showlegend=False,
+                        line=dict(width=0),
+                        fillcolor="rgba(79,195,247,0.14)", fill="tonexty"))
+                    fig.add_trace(go.Scatter(
+                        x=xs_proj, y=p25_proj, mode="lines",
+                        name="p25–p75 band", showlegend=True,
+                        line=dict(width=0),
+                        fillcolor="rgba(79,195,247,0.14)", fill="tonexty"))
+                    fig.add_trace(go.Scatter(
+                        x=xs_proj, y=p50_proj, mode="lines",
+                        name="Median (p50)", showlegend=True,
+                        line=dict(color="#4fc3f7", width=2.0, dash="dash")))
+            elif xs_proj:
                 fig.add_trace(go.Scatter(
                     x=xs_proj, y=proj_slice(stability_norm), mode="lines",
                     name="Stability (proj)", showlegend=False,
@@ -1430,16 +1629,71 @@ elif scenario["type"] == "financial":
                     name="Early Warning (proj)", showlegend=False,
                     line=dict(color="#f4a261", width=1.4, dash="dot")))
 
-            # EW pair annotations
-            for pair_idx, (spike, drop, lead) in enumerate(all_pairs[:3]):
+            # A+B: EW-Pair Annotations — vlines + vrect + Vorlauf-Zone
+            all_pairs_chart, open_pair_chart = find_ew_pairs(
+                ew_norm, stability_norm, L0_THR, STAB_THR)
+
+            for pair_idx, (spike, drop, lead) in enumerate(all_pairs_chart[:3]):
+                if spike > current_idx:
+                    break
                 if lead <= 0:
                     continue
+                # B: Vorlauf-Zone als gefüllter vrect (Orange, Vorlaufzeitraum)
+                if drop <= current_idx:
+                    fig.add_vrect(
+                        x0=spike, x1=drop,
+                        fillcolor="rgba(244,162,97,0.10)", layer="below", line_width=0)
+                # A: EW-Spike vline (Orange)
+                fig.add_vline(
+                    x=spike, line_width=1.5, line_dash="dot",
+                    line_color="rgba(244,162,97,0.85)",
+                    annotation_text="⚠ EW signal",
+                    annotation_position="top left",
+                    annotation_font_size=9,
+                    annotation_font_color="#f4a261")
+                # A: Stabilitätsabfall vline (Rot) — nur wenn bereits eingetreten
+                if drop <= current_idx:
+                    fig.add_vline(
+                        x=drop, line_width=1.5, line_dash="dot",
+                        line_color="rgba(255,59,59,0.85)",
+                        annotation_text="↓ Instability",
+                        annotation_position="top right",
+                        annotation_font_size=9,
+                        annotation_font_color="#ff3b3b")
+                # Horizontale Vorlauf-Linie mit Label
                 by = 0.97 - pair_idx * 0.07
-                fig.add_shape(type="line", x0=spike, x1=drop, y0=by, y1=by,
-                              line=dict(color="#888", width=1, dash="dot"))
-                fig.add_annotation(x=(spike+drop)//2, y=by+0.03,
-                                   text=f"{lead}mo ahead", showarrow=False,
-                                   font=dict(size=9, color="#aaaaaa"))
+                x_end = min(drop, current_idx)
+                fig.add_shape(type="line", x0=spike, x1=x_end, y0=by, y1=by,
+                              line=dict(color="#f4a261", width=1.2, dash="dot"))
+                fig.add_annotation(
+                    x=(spike + x_end) // 2, y=by + 0.035,
+                    text=f"⏱ {lead} months ahead" if drop <= current_idx else f"⏱ {current_idx - spike}mo so far",
+                    showarrow=False,
+                    font=dict(size=9, color="#f4a261"),
+                    bgcolor="rgba(0,0,0,0.35)",
+                    borderpad=2)
+
+            # Offenes EW-Pair (Signal aktiv, noch kein Abfall)
+            if open_pair_chart and open_pair_chart[0] <= current_idx:
+                ow_spike = open_pair_chart[0]
+                fig.add_vline(
+                    x=ow_spike, line_width=1.5, line_dash="dot",
+                    line_color="rgba(244,162,97,0.85)",
+                    annotation_text="⚠ EW signal",
+                    annotation_position="top left",
+                    annotation_font_size=9,
+                    annotation_font_color="#f4a261")
+                fig.add_vrect(
+                    x0=ow_spike, x1=current_idx,
+                    fillcolor="rgba(244,162,97,0.07)", layer="below", line_width=0)
+                steps_open = current_idx - ow_spike
+                fig.add_annotation(
+                    x=(ow_spike + current_idx) // 2, y=0.97,
+                    text=f"⏱ {steps_open}mo — no drop yet",
+                    showarrow=False,
+                    font=dict(size=9, color="#f4a261"),
+                    bgcolor="rgba(0,0,0,0.35)",
+                    borderpad=2)
 
             fig.add_vline(x=current_idx, line_width=1.5, line_dash="dash",
                           line_color="rgba(255,255,255,0.35)")
@@ -1523,6 +1777,21 @@ elif scenario["type"] == "financial":
                 pills_html += "</div>"
                 st.markdown(pills_html, unsafe_allow_html=True)
 
-            st.markdown(network_legend_html(), unsafe_allow_html=True)
+            # Legende: dynamisch aus Snapshot
+            _fin_spaces = list({n.get('space')
+                                for n in current['nodes'].values()
+                                if n.get('space')})
+            _fin_has_bridge = 'bridge_active' in current['edges'].values()
+            _fin_metrics = [
+                ("●", "#4fc3f7", "Financial System Capacity",
+                 "How well the financial sector (banks, funds, sovereigns) supplies liquidity."),
+                ("■", "#6bd96b", "Economic Resilience",
+                 "Economic output and stability of countries / regions under stress."),
+            ]
+            st.markdown(network_legend_html(
+                spaces=_fin_spaces,
+                has_bridge=_fin_has_bridge,
+                metrics=_fin_metrics,
+            ), unsafe_allow_html=True)
 
-    financial_panel(history, max_step, proj_step, selected_path)
+    financial_panel(history, max_step, proj_step, selected_path, ensemble=ensemble)

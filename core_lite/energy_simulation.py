@@ -578,12 +578,15 @@ def run_energy_simulation(nodes, edges, steps=10, month_to_step=None):
             capacity = e.get("capacity", 1.0)
             status = e.get("status", "active")
 
+            strength = e.get("strength", 0.5)
             if status == "failed":
                 edge_state[key] = "weak"
             elif flow > capacity:
                 edge_state[key] = "weak"
             elif flow > 0:
                 edge_state[key] = "strong"
+            elif strength >= 0.4:
+                edge_state[key] = "ready"
             else:
                 edge_state[key] = "new"
 

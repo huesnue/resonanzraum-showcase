@@ -1,6 +1,13 @@
 import streamlit as st
 import plotly.graph_objects as go
 
+from visualization.scenario_intro import (
+    render_sidebar_tagline,
+    render_primer_card,
+    render_intro_expander,
+    metric_help,
+)
+
 from core_lite.simulation import run_simulation
 from core_lite.energy_simulation import run_energy_simulation
 from core_lite.pandemic_simulation import run_pandemic_simulation
@@ -134,6 +141,8 @@ with st.sidebar:
         options=["Basic Demo", "Energy Crisis", "Pandemic 2020–2030", "Eurozone Financial Stability", "Cloud & Cyber Resilience"],
         label_visibility="collapsed"
     )
+    # render_sidebar_tagline(scenario_name) can be used to show a short description or tagline for each scenario in the sidebar
+    render_sidebar_tagline(scenario_name)
 
 if scenario_name == "Basic Demo":
     scenario = load_basic()
@@ -194,7 +203,8 @@ if scenario["type"] == "basic":
         st.session_state["basic_mode"] = "manual"
 
     if "basic_data" not in st.session_state:
-        st.info("Press '▶ Run Simulation' to start.")
+        # st.info("Press '▶ Run Simulation' to start.")
+        render_primer_card("Basic Demo")
         st.stop()
 
     G1, hist_stable, load1, edges1, G2, hist_collapse, load2, edges2 = st.session_state["basic_data"]
@@ -209,6 +219,7 @@ if scenario["type"] == "basic":
 
     st.divider()
     st.subheader("Two systems. Same starting point. Different outcomes.")
+    render_intro_expander("Basic Demo")
 
     stab_b   = hist_collapse["stability"]
     ew_b     = hist_collapse["early_warning"]
@@ -359,7 +370,8 @@ elif scenario["type"] == "energy":
         st.session_state["mode"] = "manual"
 
     if "energy_history" not in st.session_state:
-        st.info("Press 'Run Simulation' to start.")
+        # st.info("Press 'Run Simulation' to start.")
+        render_primer_card("Energy Crisis")
         st.stop()
 
     history = st.session_state["energy_history"]
@@ -367,6 +379,7 @@ elif scenario["type"] == "energy":
 
     st.divider()
     st.subheader("Energy Network Simulation")
+    render_intro_expander("Energy Crisis") 
 
     run_every = 1.0 if st.session_state["mode"] == "playback" else None
 
@@ -683,13 +696,13 @@ elif scenario["type"] == "energy":
 # PANDEMIC SCENARIO
 # ==========================================
 elif scenario["type"] == "pandemic":
-
     st.divider()
     st.subheader("Pandemic Network Simulation — Europe 2020–2030")
     st.markdown("""
     **Phase 1 (2020–2024):** Reconstructed historical events — COVID-19 waves, Mpox outbreaks, H5N1 alerts.
     **Phase 2 (2025–2030):** Structural projection across three pathways. The system starts identically — divergence emerges from structural differences, not random chance.
     """)
+    render_intro_expander("Pandemic 2020–2030")
 
     # ------------------------------------------
     # Path selector
@@ -1269,13 +1282,13 @@ elif scenario["type"] == "pandemic":
 # FINANCIAL SCENARIO
 # ==========================================
 elif scenario["type"] == "financial":
-
     st.divider()
     st.subheader("Eurozone Financial Stability Stress Scenario 2020–2030")
     st.caption(
         "This scenario is not a forecast. It is a structural stress-test demonstrator "
         "showing how sector and regional dynamics interact under financial stress."
     )
+    render_intro_expander("Eurozone Financial Stability")
 
     path_options = {
         "🟢 Contained":  "contained",
@@ -1818,13 +1831,13 @@ elif scenario["type"] == "financial":
 # CYBER CLOUD SCENARIO
 # ==========================================
 elif scenario["type"] == "cyber_cloud":
-
     st.divider()
     st.subheader("EU Cloud & Cyber Resilience Stress Scenario 2020–2030")
     st.caption(
         "This scenario is not a forecast. It is a structural stress-test demonstrator "
         "showing how digital, financial and economic layers interact under cyber stress."
     )
+    render_intro_expander("Cloud & Cyber Resilience")
 
     path_options = {
         "🟢 Resilient": "resilient",

@@ -126,15 +126,15 @@ EVENTS_HISTORICAL = [
         "source": "EU-Kommission, Juli 2021"
     },
     {
-        "month": "Jun 2021",
+        "month": "Mar 2021",
         "type": "variability_shock",
         "cluster": "NBFI",
-        "factor": 1.20,
+        "factor": 1.22,
         "duration": 4,
         "plateau": 2,
         "decay": 0.25,
-        "name": "Archegos-Schock — NBFI-Konzentrationsrisiken sichtbar",
-        "source": "FSB NBFI Report, 2021"
+        "name": "Archegos Capital Default (26.03.2021) — ~10 Mrd USD Prime-Brokerage-Verluste (CS ~5.5 Mrd, Nomura ~2.85 Mrd), NBFI-Konzentrationsrisiken sichtbar",
+        "source": "SEC/Credit Suisse Special Committee Report 07/2021; FINMA Press Release 24.07.2023; FSB NBFI Report 2021"
     },
     {
         "month": "Oct 2021",

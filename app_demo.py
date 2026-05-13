@@ -7,6 +7,10 @@ from visualization.scenario_intro import (
     render_intro_expander,
     metric_help,
 )
+from visualization.critical_infra_intro import (
+    render_critical_infra_primer,
+    render_critical_infra_intro,
+)
 
 from core_lite.simulation import run_simulation
 from core_lite.energy_simulation import run_energy_simulation
@@ -27,6 +31,13 @@ from scenarios.energy_events import EVENTS as ENERGY_EVENTS
 from scenarios.pandemic_events import get_events as get_pandemic_events, STOCHASTIC_PARAMS as PANDEMIC_STOCHASTIC_PARAMS
 from scenarios.financial_events import get_events as get_financial_events, STOCHASTIC_PARAMS as FINANCIAL_STOCHASTIC_PARAMS
 from scenarios.cyber_cloud_events import get_events as get_cyber_cloud_events, STOCHASTIC_PARAMS as CYBER_STOCHASTIC_PARAMS
+from core_lite.critical_infra_simulation import run_critical_infra_simulation
+from core_lite.critical_infra_ensemble import run_ensemble as run_critical_infra_ensemble
+from scenarios.critical_infra import load_scenario as load_critical_infra
+from scenarios.critical_infra_events import (
+    get_events as get_critical_infra_events,
+    STOCHASTIC_PARAMS as CRITICAL_INFRA_STOCHASTIC_PARAMS,
+)
 
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
@@ -70,6 +81,101 @@ CYBER_MONTHS         = generate_months_pandemic(start="2020-01", steps=126)
 CYBER_MONTH_TO_STEP  = {m: i for i, m in enumerate(CYBER_MONTHS)}
 CYBER_STEPS          = len(CYBER_MONTHS)
 CYBER_PROJECTION_START = "Jun 2026"
+
+# Critical-Infra timeline: Jan 2020 -> Jun 2030 (126 months,
+# konsistent mit Pandemic/Financial/Cyber)
+CRITICAL_INFRA_MONTHS         = generate_months_pandemic(start="2020-01", steps=126)
+CRITICAL_INFRA_MONTH_TO_STEP  = {m: i for i, m in enumerate(CRITICAL_INFRA_MONTHS)}
+CRITICAL_INFRA_STEPS          = len(CRITICAL_INFRA_MONTHS)
+CRITICAL_INFRA_PROJECTION_START = "Jun 2026"
+
+# ------------------------------------------
+# Critical Infrastructure: Early Warning Logic
+# ------------------------------------------
+def compute_critical_infra_ew(history):
+    """Strukturelle Drift aus capacity_buffer, shock_pressure,
+    system_health, economic_layer (gemittelt).
+    
+    Returns: (ew_norm, stab_series, EW_THR, STAB_THR)
+      ew_norm     : auf [0,1] normalisierte Drift, geglaettet 3mo
+      stab_series : rail_share als Stability-Proxy
+      EW_THR      : 0.30 (Elevated-Schwelle)
+      STAB_THR    : 0.85 (15% Migration aktiviert Instability)
+    """
+    n = len(history)
+    if n == 0:
+        return [], [], 0.30, 0.85
+    
+    health_series = [h["system_health"] for h in history]
+    health_series = [h["system_health"] for h in history]
+    cb_series     = [h.get("capacity_buffer",  0.60) for h in history]
+    sp_series     = [h.get("shock_pressure",   0.0)  for h in history]
+    
+    econ_series = [
+        sum(h.get("economic_layer", {}).values()) /
+        max(len(h.get("economic_layer", {})), 1)
+        if h.get("economic_layer") else 1.0
+        for h in history
+    ]
+    
+    structural_drift_raw = [0.0]
+    for i in range(1, n):
+        d_cb     = max(0.0, cb_series[i-1]    - cb_series[i])
+        d_sp     = max(0.0, sp_series[i]      - sp_series[i-1])
+        d_health = max(0.0, health_series[i-1] - health_series[i])
+        d_econ   = max(0.0, econ_series[i-1]  - econ_series[i])
+        structural_drift_raw.append(
+            0.40 * d_cb + 0.25 * d_sp + 0.20 * d_health + 0.15 * d_econ
+        )
+    
+    # 3-Monats-Glaettung
+    n_smooth = 3
+    smooth = []
+    for i in range(n):
+        window = structural_drift_raw[max(0, i-n_smooth+1):i+1]
+        smooth.append(sum(window) / len(window))
+    
+    drift_max = max(smooth) if max(smooth) > 0 else 1.0
+    ew_norm = [max(0.0, v / drift_max) for v in smooth]
+    
+    # Stability-Proxy: rail_share (Pendler-Migration als Outcome)
+    stab_series = [h.get("rail_share", 1.0) for h in history]
+    
+    return ew_norm, stab_series, 0.30, 0.85
+
+
+def find_ew_pairs_critical_infra(ew, stab, ew_thr, st_thr, min_lead=2):
+    """Verknuepfe EW-Spikes mit nachfolgenden Stability-Drops.
+    
+    Args:
+      min_lead: minimaler Vorlauf in Monaten, damit ein Pair als
+                "Frueh"warnung zaehlt (default 2 -> filtert
+                simultane Schocks wie COVID heraus).
+    
+    Returns: (all_pairs, open_pair)
+      all_pairs = list of (spike_idx, drop_idx, lead_in_months)
+      open_pair = (spike_idx, None, None) wenn Drop noch ausstaendig
+    """
+    pairs, open_pair, i = [], None, 1
+    while i < len(ew):
+        if ew[i] > ew_thr and ew[i-1] <= ew_thr:
+            spike, found = i, False
+            for j in range(spike+1, len(stab)):
+                if stab[j] < st_thr and stab[j-1] >= st_thr:
+                    lead = j - spike
+                    if lead >= min_lead:
+                        pairs.append((spike, j, lead))
+                        i, found = j+1, True
+                        break
+                    else:
+                        # Drop kam zu schnell, zaehlt nicht als "warning"
+                        i = j+1; found = True; break
+            if not found:
+                open_pair = (spike, None, None)
+                i += 1
+        else:
+            i += 1
+    return pairs, open_pair
 
 # ------------------------------------------
 # Basic Demo helpers
@@ -151,7 +257,14 @@ with st.sidebar:
     st.markdown("**Select a scenario**")
     scenario_name = st.selectbox(
         "Select a scenario",
-        options=["Basic Demo", "Energy Crisis", "Pandemic 2020–2030", "Eurozone Financial Stability", "Cloud & Cyber Resilience"],
+        options=[
+            "Basic Demo",
+            "Energy Crisis",
+            "Pandemic 2020-2030",
+            "Eurozone Financial Stability",
+            "Cloud & Cyber Resilience",
+            "Rail & Critical Infrastructure",
+        ],
         label_visibility="collapsed"
     )
     # render_sidebar_tagline(scenario_name) can be used to show a short description or tagline for each scenario in the sidebar
@@ -165,6 +278,8 @@ elif scenario_name == "Eurozone Financial Stability":
     scenario = {"type": "financial"}   # path selected inside panel
 elif scenario_name == "Cloud & Cyber Resilience":
     scenario = {"type": "cyber_cloud"}   # path selected inside panel
+elif scenario_name == "Rail & Critical Infrastructure":
+    scenario = {"type": "critical_infra"}   # path selected inside panel
 else:
     scenario = {"type": "pandemic"}   # path selected inside panel
 
@@ -190,7 +305,13 @@ if st.session_state["last_scenario"] != scenario_name:
                 "cyber_cloud_history_fragile",
                 "cyber_cloud_ensemble_resilient",
                 "cyber_cloud_ensemble_hybrid",
-                "cyber_cloud_ensemble_fragile"]:
+                "cyber_cloud_ensemble_fragile",
+                "critical_infra_history_resilient",
+                "critical_infra_history_hybrid",
+                "critical_infra_history_fragile",
+                "critical_infra_ensemble_resilient",
+                "critical_infra_ensemble_hybrid",
+                "critical_infra_ensemble_fragile"]:
         st.session_state.pop(key, None)
     st.session_state["last_scenario"] = scenario_name
     st.session_state["step"] = 0
@@ -2487,3 +2608,458 @@ elif scenario["type"] == "cyber_cloud":
             ), unsafe_allow_html=True)
 
     cyber_cloud_panel(history, max_step, proj_step, selected_path, ensemble=ensemble)
+
+# ==========================================
+# CRITICAL INFRASTRUCTURE SCENARIO
+# ==========================================
+elif scenario["type"] == "critical_infra":
+    st.divider()
+    st.subheader("Rail & Critical Infrastructure Resilience 2020-2030")
+    st.caption(
+        "Four coupled resonance spaces — digital (cloud/cyber), rail, "
+        "economic and social (mobility clusters). The scenario demonstrates "
+        "cross-domain propagation and cluster migration in the social space."
+    )
+
+    path_options = {
+        "🟢 Resilient": "resilient",
+        "🟡 Hybrid":    "hybrid",
+        "🔴 Fragile":   "fragile",
+    }
+    selected_label = st.radio(
+        "Structural path",
+        options=list(path_options.keys()),
+        horizontal=True,
+        key="critical_infra_path_radio"
+    )
+    selected_path = path_options[selected_label]
+    history_key   = f"critical_infra_history_{selected_path}"
+    ensemble_key  = f"critical_infra_ensemble_{selected_path}"
+
+    if run_clicked:
+        params = CRITICAL_INFRA_STOCHASTIC_PARAMS[selected_path]
+
+        def _load_ci_nodes():
+            return load_critical_infra(path=selected_path)["nodes"]
+        def _load_ci_edges():
+            return load_critical_infra(path=selected_path)["edges"]
+
+        path_label = selected_label
+        progress_bar = st.progress(0, text=f"Running ensemble — {path_label} — 0 / 50")
+
+        def _update_ci_progress(pct, done, total):
+            progress_bar.progress(pct, text=f"Running ensemble — {path_label} — {done} / {total}")
+
+        ensemble = run_critical_infra_ensemble(
+            load_nodes_fn=_load_ci_nodes,
+            load_edges_fn=_load_ci_edges,
+            run_simulation_fn=run_critical_infra_simulation,
+            get_events_fn=get_critical_infra_events,
+            stochastic_params=params,
+            path_name=selected_path,
+            steps=CRITICAL_INFRA_STEPS,
+            month_to_step=CRITICAL_INFRA_MONTH_TO_STEP,
+            projection_start_month=CRITICAL_INFRA_PROJECTION_START,
+            month_labels=CRITICAL_INFRA_MONTHS,
+            n_runs=50,
+            progress_callback=_update_ci_progress,
+        )
+        progress_bar.empty()
+
+        st.session_state[ensemble_key] = ensemble
+        st.session_state[history_key]  = ensemble["median_history"]
+        st.session_state["step"] = 0
+        st.session_state["mode"] = "manual"
+
+    # Pre-Run-Guard
+    if history_key not in st.session_state:
+        render_critical_infra_primer()
+        st.stop()
+
+    render_critical_infra_intro()
+
+    ensemble  = st.session_state.get(ensemble_key)
+    history   = st.session_state[history_key]
+    max_step  = len(history) - 1
+    proj_step = CRITICAL_INFRA_MONTH_TO_STEP.get(CRITICAL_INFRA_PROJECTION_START, max_step)
+
+    run_every_ci = 1.0 if st.session_state["mode"] == "playback" else None
+
+    @st.fragment(run_every=run_every_ci)
+    def critical_infra_panel(history, max_step, proj_step, selected_path, ensemble=None):
+
+        is_playing = st.session_state["mode"] == "playback"
+        if is_playing:
+            cur = st.session_state["step"]
+            if cur < max_step:
+                st.session_state["step"] = cur + 1
+            else:
+                st.session_state["mode"] = "manual"
+                st.rerun()
+
+        # Controls
+        ctrl1, ctrl2, ctrl3 = st.columns([1, 1, 4])
+        with ctrl1:
+            if st.button("▶ Play", key="ci_play", disabled=is_playing, width="stretch"):
+                st.session_state["mode"] = "playback"
+                st.session_state["step"] = 0
+                st.rerun()
+        with ctrl2:
+            if st.button("⏸ Step", key="ci_pause", disabled=not is_playing, width="stretch"):
+                st.session_state["mode"] = "manual"
+                st.rerun()
+        with ctrl3:
+            if "ci_sim_step" not in st.session_state:
+                st.session_state["ci_sim_step"] = st.session_state["step"]
+            if is_playing:
+                st.session_state["ci_sim_step"] = st.session_state["step"]
+            step = st.slider("Month", 0, max_step, key="ci_sim_step",
+                             disabled=is_playing, label_visibility="collapsed")
+            if not is_playing:
+                st.session_state["step"] = step
+
+        current       = history[st.session_state["step"]]
+        current_idx   = st.session_state["step"]
+        current_month = CRITICAL_INFRA_MONTHS[current_idx]
+        is_proj       = current.get("is_projection", False)
+
+        # Metriken: 6 Karten (Phase / Health / Digital / Rail / Economic / Social)
+        m1, m2, m3, m4, m5, m6 = st.columns(6)
+        health_val = current["system_health"]
+
+        dig_layer  = current.get("digital_layer",  {})
+        rail_layer = current.get("rail_layer",     {})
+        eco_layer  = current.get("economic_layer", {})
+        soc_layer  = current.get("social_layer",   {})
+
+        def _avg_layer(lyr, fallback):
+            return sum(lyr.values()) / len(lyr) if lyr else fallback
+
+        avg_dig  = _avg_layer(dig_layer,  health_val)
+        avg_rail = _avg_layer(rail_layer, health_val)
+        avg_eco  = _avg_layer(eco_layer,  health_val)
+        avg_soc  = _avg_layer(soc_layer,  health_val)
+
+        phase_label = "📡 Projection" if is_proj else "📂 Historical"
+        m1.metric(phase_label, current_month)
+        m2.metric("System Health",        f"{health_val:.0%}")
+        m3.metric("☁️ Digital Resilience", f"{avg_dig:.0%}")
+        m4.metric("🚆 Rail Operability",   f"{avg_rail:.0%}")
+        m5.metric("🏭 Economic Output",    f"{avg_eco:.0%}")
+        m6.metric("👥 Social Mobility",    f"{avg_soc:.0%}")
+
+        # ------------------------------------------
+        # EARLY WARNING — strukturelle Drift
+        # (rail_share als Stability-Proxy, da System Health
+        #  bei critical_infra strukturell beladen startet)
+        # ------------------------------------------
+        ew_norm, stability_series, L0_THR, STAB_THR = compute_critical_infra_ew(history)
+        
+        _ew_now = ew_norm[current_idx] if current_idx < len(ew_norm) else 0.0
+        if _ew_now >= 0.60:
+            _ew_label, _ew_icon = "High", "🔴"
+        elif _ew_now >= 0.30:
+            _ew_label, _ew_icon = "Elevated", "🟡"
+        else:
+            _ew_label, _ew_icon = "Low", "🟢"
+        
+        # 7. Kachel als Zusatz-Spalte. Falls 7-col-Layout zu eng:
+        # Active-Event-Banner in 2. Zeile verschieben.
+        _ew_col = st.columns([1])[0]
+        _ew_col.metric(
+            label="Early Warning",
+            value=f"{_ew_icon} {_ew_label}",
+            delta=f"{_ew_now:.0%} structural signal",
+            delta_color="off",
+        )
+        
+        # Active-Event-Banner (analog cyber_cloud, mit active_event statt active_attack)
+        active_event = current.get("active_event")
+        if active_event:
+            etype  = active_event.get("type", "unknown")
+            actor  = active_event.get("actor", "unknown")
+            inten  = active_event.get("intensity", 0.0)
+            target = active_event.get("target_cluster") or "system-wide"
+            st.markdown(
+                f"<div style='background:rgba(167,71,71,0.12);border-left:3px solid #c66767;"
+                f"border-radius:0 6px 6px 0;padding:6px 14px;font-size:12px;margin-bottom:8px;"
+                f"display:flex;flex-wrap:wrap;gap:14px;align-items:center;'>"
+                f"<span>⚠️ <strong>Active event</strong></span>"
+                f"<span style='opacity:0.85;'>type: <strong>{etype}</strong></span>"
+                f"<span style='opacity:0.85;'>source: <strong>{actor}</strong></span>"
+                f"<span style='opacity:0.85;'>target: <strong>{target}</strong></span>"
+                f"<span style='opacity:0.85;'>intensity: <strong>{inten:.2f}</strong></span>"
+                f"</div>", unsafe_allow_html=True)
+
+        # Migration-Banner — sichtbar wenn rail_share < 0.85
+        rail_share = current.get("rail_share", 1.0)
+        trust_rail = current.get("trust_rail", 0.6)
+        if rail_share < 0.85:
+            st.markdown(
+                f"<div style='background:rgba(255,170,102,0.12);border-left:3px solid #ffaa66;"
+                f"border-radius:0 6px 6px 0;padding:6px 14px;font-size:12px;margin-bottom:8px;"
+                f"display:flex;flex-wrap:wrap;gap:14px;align-items:center;'>"
+                f"<span>🔁 <strong>Cluster migration active</strong></span>"
+                f"<span style='opacity:0.85;'>rail demand share: <strong>{rail_share:.0%}</strong></span>"
+                f"<span style='opacity:0.85;'>commuter trust: <strong>{trust_rail:.0%}</strong></span>"
+                f"<span style='opacity:0.85;font-style:italic;'>"
+                f"rail → car / home-office / alt-mobility / air</span>"
+                f"</div>", unsafe_allow_html=True)
+        # ------------------------------------------
+        # EW-PAIR-BANNER (Lead-Time)
+        # ------------------------------------------
+        all_ew_pairs, open_ew_pair = find_ew_pairs_critical_infra(
+            ew_norm[:current_idx+1],
+            stability_series[:current_idx+1],
+            L0_THR, STAB_THR)
+        
+        display_pair, display_open = None, False
+        if open_ew_pair:
+            display_pair, display_open = open_ew_pair, True
+        elif all_ew_pairs:
+            last = all_ew_pairs[-1]
+            if current_idx - last[1] <= 8:
+                display_pair, display_open = last, False
+        
+        if display_pair:
+            spike_m = (CRITICAL_INFRA_MONTHS[display_pair[0]]
+                       if display_pair[0] < len(CRITICAL_INFRA_MONTHS) else "")
+            if display_open:
+                steps_since = current_idx - display_pair[0]
+                st.markdown(
+                    f"<div style='background:rgba(244,162,97,0.15);"
+                    f"border-left:3px solid #f4a261;"
+                    f"border-radius:0 6px 6px 0;padding:8px 14px;"
+                    f"font-size:13px;margin-bottom:8px;'>"
+                    f"⚠️ <strong>Early Warning active</strong> since {spike_m} "
+                    f"— structural weakening detected <strong>{steps_since} "
+                    f"month{'s' if steps_since!=1 else ''} ago</strong>. "
+                    f"Migration not yet confirmed.</div>",
+                    unsafe_allow_html=True)
+            else:
+                st.markdown(
+                    f"<div style='background:rgba(244,162,97,0.12);"
+                    f"border-left:3px solid #f4a261;"
+                    f"border-radius:0 6px 6px 0;padding:8px 14px;"
+                    f"font-size:13px;margin-bottom:8px;'>"
+                    f"💡 <strong>Early Warning</strong> ({spike_m}) signaled "
+                    f"structural weakening <strong>{display_pair[2]} months</strong> "
+                    f"before commuter migration visibly accelerated.</div>",
+                    unsafe_allow_html=True)
+                
+        # --- Chart: vier Layer + Health-Median-Bandbreite ---
+        col_left, col_right = st.columns([6, 5])
+
+        with col_left:
+            fig = go.Figure()
+            n = len(history)
+            x_idx = list(range(n))
+
+            def _layer_series(key):
+                return [
+                    sum(h.get(key, {}).values()) / max(len(h.get(key, {})), 1)
+                    for h in history
+                ]
+
+            health_series = [h["system_health"] for h in history]
+            dig_series  = _layer_series("digital_layer")
+            rail_series = _layer_series("rail_layer")
+            eco_series  = _layer_series("economic_layer")
+            soc_series  = _layer_series("social_layer")
+            rshare_series = [h.get("rail_share", 1.0) for h in history]
+
+            # Ensemble-Band fuer System Health
+            if ensemble is not None and "health" in ensemble:
+                p10 = ensemble["health"]["p10"]
+                p90 = ensemble["health"]["p90"]
+                fig.add_trace(go.Scatter(
+                    x=x_idx + x_idx[::-1],
+                    y=p90 + p10[::-1],
+                    fill="toself",
+                    fillcolor="rgba(79,195,247,0.10)",
+                    line=dict(color="rgba(0,0,0,0)"),
+                    name="health p10-p90",
+                    showlegend=True,
+                ))
+
+            fig.add_trace(go.Scatter(x=x_idx, y=health_series,
+                                     mode="lines", line=dict(color="#4fc3f7", width=2.5),
+                                     name="System Health (median)"))
+            fig.add_trace(go.Scatter(x=x_idx, y=dig_series,
+                                     mode="lines", line=dict(color="#4fc3f7", width=1.2, dash="dot"),
+                                     name="☁️ Digital"))
+            fig.add_trace(go.Scatter(x=x_idx, y=rail_series,
+                                     mode="lines", line=dict(color="#6bd96b", width=1.6),
+                                     name="🚆 Rail"))
+            fig.add_trace(go.Scatter(x=x_idx, y=eco_series,
+                                     mode="lines", line=dict(color="#c084fc", width=1.2, dash="dot"),
+                                     name="🏭 Economic"))
+            fig.add_trace(go.Scatter(x=x_idx, y=soc_series,
+                                     mode="lines", line=dict(color="#ffaa66", width=1.6),
+                                     name="👥 Social"))
+            # Rail-Share (Migrations-Indikator) auf eigener Achse
+            fig.add_trace(go.Scatter(x=x_idx, y=rshare_series,
+                                     mode="lines",
+                                     line=dict(color="#ff9c66", width=1.2, dash="dash"),
+                                     name="Rail demand share",
+                                     yaxis="y2", opacity=0.7))
+
+            # ------------------------------------------
+            # EARLY WARNING — Linie + Pair-Annotations
+            # ------------------------------------------
+            xs_hist = list(range(min(proj_step+1, n)))
+            xs_proj = list(range(proj_step, n)) if proj_step < n else []
+            
+            ew_hist = ew_norm[:len(xs_hist)]
+            ew_proj = ew_norm[proj_step:] if xs_proj else []
+            
+            fig.add_trace(go.Scatter(
+                x=xs_hist, y=ew_hist, mode="lines",
+                name="Early Warning",
+                line=dict(color="#f4a261", width=1.8),
+                fill="tozeroy", fillcolor="rgba(244,162,97,0.07)"))
+            
+            if xs_proj:
+                fig.add_trace(go.Scatter(
+                    x=xs_proj, y=ew_proj, mode="lines",
+                    name="Early Warning (proj)", showlegend=False,
+                    line=dict(color="#f4a261", width=1.4, dash="dot")))
+            
+            # EW-Pair-Annotations: max. 3 zeigen
+            all_pairs_chart, open_pair_chart = find_ew_pairs_critical_infra(
+                ew_norm, stability_series, L0_THR, STAB_THR)
+            
+            for pair_idx, (spike, drop, lead) in enumerate(all_pairs_chart[:3]):
+                if spike > current_idx:
+                    break
+                if drop <= current_idx:
+                    fig.add_vrect(
+                        x0=spike, x1=drop,
+                        fillcolor="rgba(244,162,97,0.10)",
+                        layer="below", line_width=0)
+                fig.add_vline(
+                    x=spike, line_width=1.5, line_dash="dot",
+                    line_color="rgba(244,162,97,0.85)",
+                    annotation_text="⚠ EW signal",
+                    annotation_position="top left",
+                    annotation_font_size=9,
+                    annotation_font_color="#f4a261")
+                if drop <= current_idx:
+                    fig.add_vline(
+                        x=drop, line_width=1.5, line_dash="dot",
+                        line_color="rgba(255,59,59,0.85)",
+                        annotation_text="↓ Migration",
+                        annotation_position="top right",
+                        annotation_font_size=9,
+                        annotation_font_color="#ff3b3b")
+                by = 0.97 - pair_idx * 0.07
+                x_end = min(drop, current_idx) if drop is not None else current_idx
+                fig.add_shape(type="line",
+                              x0=spike, x1=x_end, y0=by, y1=by,
+                              line=dict(color="#f4a261", width=1.2, dash="dot"))
+                fig.add_annotation(
+                    x=(spike + x_end) // 2, y=by + 0.035,
+                    text=(f"⏱ {lead} months ahead" if drop <= current_idx
+                          else f"⏱ {current_idx - spike}mo so far"),
+                    showarrow=False, font=dict(size=9, color="#f4a261"))
+                
+            # Projektions-Trennlinie
+            fig.add_vline(x=proj_step, line_width=1.2, line_dash="dot",
+                          line_color="rgba(255,255,255,0.35)")
+            fig.add_vline(x=current_idx, line_width=1.5, line_dash="dash",
+                          line_color="rgba(255,255,255,0.35)")
+
+            # Achsen: nur jedes 12. Monat anzeigen
+            tick_vals = list(range(0, n, 12))
+            tick_text = [CRITICAL_INFRA_MONTHS[i] for i in tick_vals if i < len(CRITICAL_INFRA_MONTHS)]
+
+            fig.update_layout(
+                height=440,
+                margin=dict(l=20, r=60, t=30, b=70),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                yaxis=dict(range=[0,1.08], showgrid=True, gridcolor="rgba(255,255,255,0.05)",
+                           tickformat=".0%", tickfont=dict(size=9)),
+                yaxis2=dict(range=[0,1.08], overlaying="y", side="right",
+                            tickformat=".0%", tickfont=dict(size=9, color="#ff9c66"),
+                            showgrid=False, title=dict(text="Rail share", font=dict(size=10, color="#ff9c66"))),
+                xaxis=dict(tickvals=tick_vals, ticktext=tick_text,
+                           tickangle=-45, tickfont=dict(size=9), showgrid=False),
+                legend=dict(orientation="h", yanchor="bottom", y=-0.45,
+                            xanchor="center", x=0.5, font=dict(size=10)),
+            )
+            st.plotly_chart(fig, width="stretch")
+
+        with col_right:
+            # Highlight-Knoten aus aktiven Events
+            highlight_nodes, highlight_edges = set(), set()
+            all_evts = get_critical_infra_events(selected_path)
+            active_events = []
+            for event in all_evts:
+                if "month" not in event or event["month"] not in CRITICAL_INFRA_MONTH_TO_STEP:
+                    continue
+                es = CRITICAL_INFRA_MONTH_TO_STEP[event["month"]]
+                if current_idx >= es and current_idx < es + event.get("duration", 1):
+                    active_events.append(event)
+            for nid in current.get("highlight_nodes", []):
+                highlight_nodes.add(nid)
+            for event in active_events:
+                if "cluster" in event:
+                    for node, data in current["nodes"].items():
+                        if data.get("cluster") == event["cluster"]:
+                            highlight_nodes.add(node)
+
+            st.plotly_chart(
+                plot_network(current["graph"], current["load"], current["edges"],
+                             highlight_nodes=highlight_nodes, highlight_edges=highlight_edges,
+                             pos=current.get("pos"), cluster_anchors=current.get("cluster_anchors")),
+                width="stretch")
+
+            # Event-Pills
+            if active_events:
+                type_colors = {
+                    "supply_shock":       ("#7C1D1D", "#FCA5A5"),
+                    "capacity_shock":     ("#7C1D1D", "#FCA5A5"),
+                    "demand_shock":       ("#78350F", "#FCD34D"),
+                    "uncertainty_shock":  ("#78350F", "#FCD34D"),
+                    "variability_shock":  ("#78350F", "#FCD34D"),
+                    "capacity_increase":  ("#14532D", "#86EFAC"),
+                    "coupling_shift":     ("#1E3A5F", "#93C5FD"),
+                    "alliance_shift":     ("#312E81", "#C4B5FD"),
+                    "migration_shift":    ("#7C4A2D", "#FFB87F"),
+                }
+                pills_html = "<div style='display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;margin-bottom:8px;'>"
+                for ev in active_events:
+                    bg, fg = type_colors.get(ev.get("type", ""), ("#374151", "#D1D5DB"))
+                    icon = "🎲" if ev.get("stochastic") else "⚡"
+                    name = ev.get("name", ev.get("type", "event"))
+                    pills_html += (
+                        f"<span style='background:{bg};color:{fg};font-size:11px;font-weight:500;"
+                        f"padding:3px 10px;border-radius:12px;white-space:nowrap;'>"
+                        f"{icon} {name}</span>"
+                    )
+                pills_html += "</div>"
+                st.markdown(pills_html, unsafe_allow_html=True)
+
+            # Legende: vier Raeume + Bridge + Substitution + vier Metriken
+            _ci_spaces = list({n.get("space")
+                               for n in current["nodes"].values()
+                               if n.get("space")})
+            _ci_has_bridge = "bridge_active" in current["edges"].values()
+            _ci_metrics = [
+                ("●", "#4fc3f7", "Digital Resilience",
+                 "Operational health of cloud, identity, control center, and platform layer."),
+                ("■", "#6bd96b", "Rail Operability",
+                 "Capacity of main nodes, signaling, dispatching and regional rail network."),
+                ("◆", "#c084fc", "Economic Output",
+                 "Supply chain, freight, production, services and market sentiment."),
+                ("⬡", "#ffaa66", "Social Mobility",
+                 "Rail commuters and substitution clusters (car, home office, alt, air)."),
+            ]
+            st.markdown(network_legend_html(
+                spaces=_ci_spaces,
+                has_bridge=_ci_has_bridge,
+                metrics=_ci_metrics,
+            ), unsafe_allow_html=True)
+
+    critical_infra_panel(history, max_step, proj_step, selected_path, ensemble=ensemble)

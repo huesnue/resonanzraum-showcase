@@ -347,12 +347,12 @@ EVENTS_HISTORICAL = [
     {
         "month": "Nov 2024",
         "type": "uncertainty_shock",
-        "factor": 1.25,
+        "factor": 1.12,
         "duration": 4,
         "plateau": 2,
-        "decay": 0.3,
-        "name": "H5N1 Human-to-Human Verdachtsfälle",
-        "source": "WHO Risk Assessment Nov 2024"
+        "decay": 0.25,
+        "name": "H5N1 — schwerer Teenager-Fall British Columbia mit unklarer Exposition, Risiko-Re-Assessment WHO/CDC (KEIN H2H dokumentiert)",
+        "source": "PHAC Nov 2024; CDC H5N1 Response Update 18.11.2024"
     },
 ]
 

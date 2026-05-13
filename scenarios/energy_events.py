@@ -306,7 +306,29 @@ EVENTS = [
         "decay": 0.3,
         "name": "Demand Stabilization"
     },
-
+    # -----------------------------
+    # 2025 MID – FIRST IRAN ESCALATION
+    # -----------------------------
+    {
+        "month": "Jun 2025",
+        "type": "supply_shock",
+        "cluster": "MIDDLE_EAST",
+        "factor": 0.78,
+        "duration": 4,
+        "plateau": 2,
+        "decay": 0.25,
+        "name": "Israel Op. Rising Lion (12./13.06.) + US Op. Midnight Hammer (21./22.06.) — Iran nuclear sites struck",
+        "note": "7 B-2 bombers, 14 GBU-57 MOPs on Fordow/Natanz/Isfahan; first kinetic strike on Iran nuclear program"
+    },
+    {
+        "month": "Jun 2025",
+        "type": "uncertainty_shock",
+        "factor": 1.20,
+        "duration": 4,
+        "plateau": 2,
+        "decay": 0.20,
+        "name": "Strait of Hormuz closure threats — Iranian Parliament vote 23.06., shipping risk premium spikes"
+    },
     # -----------------------------
     # 2025 LATE – ESCALATION
     # -----------------------------

@@ -336,17 +336,17 @@ EVENTS_HISTORICAL = [
         "source": "CrowdStrike Root Cause Analysis Aug 2024; CISA Statement"
     },
     {
-        "month": "Oct 2024",
+        "month": "Jul 2024",
         "type": "supply_shock",
         "cluster": "Cloud",
-        "factor": 0.78,
+        "factor": 0.72,
         "duration": 1,
         "plateau": 1,
-        "decay": 0.40,
-        "name": "Microsoft Azure Outage Oct 2024 — DDoS+Config-Drift, NatWest, Outlook, M365 ca. 10h",
+        "decay": 0.45,
+        "name": "Microsoft Azure Outage (30.07.2024) — DDoS auf Azure Front Door + CDN, fehlerhafte Defense-Implementation verstaerkte Wirkung, NatWest/Outlook/M365 ca. 8-10h (11 Tage nach CrowdStrike)",
         "attack_type": "cloud_outage",
-        "actor": "Microsoft Azure (DDoS + interner Config-Fehler)",
-        "source": "Microsoft Azure Status History; Computing UK Oct 2024"
+        "actor": "Microsoft Azure (DDoS + fehlerhafte DDoS-Defense-Implementation)",
+        "source": "Microsoft Azure Status History 30.07.2024; Cybersecurity Dive; BBC; bleepingcomputer.com"
     },
 
     # ---- 2025: DORA + NoName-Welle + Cloudflare + AWS DNS ----

@@ -16,7 +16,7 @@ This project demonstrates one core idea:
 
 ## 🔍 What this demo shows
 
-Five scenarios, one insight:
+Six scenarios, one insight:
 
 **Basic Demo** — Two network systems start identically. One remains stable under constant stress. One collapses under increasing pressure. The Early Warning signal diverges **months before** the Stability signal drops — making the coming failure visible long before it occurs.
 
@@ -27,6 +27,8 @@ Five scenarios, one insight:
 **Eurozone Financial Stability 2020–2030** — A simulated European financial system stress-test demonstrator. This is not a forecast — it shows how a seemingly stable financial system can become structurally vulnerable through rising stress, declining buffers, sectoral interlinkages, and regional feedback loops. Two coupled spaces — a sector space (banks, funds, sovereigns, policy) and a regional space (countries) — interact through a cross-space bridge. Phase 1 (2020–2026) reconstructs historical stress events: COVID market shock, inflation surge, the rate hike cycle, banking stress 2023, CRE valuation pressure. Phase 2 (2026–2030) projects three structural pathways — Contained, Prolonged, and Systemic — with a Monte Carlo ensemble of 50 runs.
 
 **Cloud & Cyber Resilience 2020–2030** — A simulated EU cloud and cyber resilience stress-test demonstrator across **three coupled spaces**: a digital space (cloud hyperscalers, identity providers, API gateways, payment switch, security operations, backup), a financial space (ECB, banks, payment systems, capital markets, insurance), and an economic space (DE/FR/IT/ES-NL economies, SMEs, public services). Five cross-space bridges connect the layers. Phase 1 (2020–2026) reconstructs 26 publicly documented cyber events: COVID cloud surge, SolarWinds, Log4Shell, Viasat KA-SAT (with 5,800 affected Enercon turbines in Germany), NoName057(16) DDoS waves, MOVEit/CL0P, Storm-0558, Akira/Tietoevry, CrowdStrike global outage, AWS US-EAST-1 DNS failure, the DORA regulation taking effect, and Operation Eastwood. Phase 2 (2026–2030) projects three structural pathways — Resilient, Hybrid, and Fragile — with a 50-run Monte Carlo ensemble. A dedicated **Active Threat** indicator surfaces the dominant attack type and actor (where attribution is public) at every step.
+
+> **Rail & Critical Infrastructure Resilience 2020–2030** — A simulated stress-test demonstrator for critical infrastructure across **four coupled spaces**: a digital space (cloud platform, identity provider, control center as the OT/IT bridge, API gateway, communication network), a rail space (main nodes, signaling, dispatching, maintenance capacity, regional network), an economic space (supply chain, freight logistics, production, services, market sentiment) and — newly introduced in this scenario — a social space of mobility clusters (rail commuters, car users, home office, alternative mobility, air travel). Seven cross-space bridges connect the layers and five substitution edges within the social space carry **cluster migration** between mobility forms. Phase 1 (2020–2026) reconstructs publicly documented incidents: the COVID commuter collapse and home-office surge (Mar 2020), SolarWinds (Dec 2020), the DB rail-radio sabotage in Berlin / Schleswig-Holstein / NRW (Oct 2022), GDL rail-strike waves (Jan 2024), the Riedbahn corridor general overhaul Frankfurt–Mannheim (Jul–Dec 2024), the CrowdStrike Falcon global Windows outage (Jul 2024), DORA taking effect (Jan 2025), and an OT/IT bridge compromise at a traffic control center (Oct 2025). Phase 2 (2026–2030) projects three structural pathways — Resilient, Hybrid, and Fragile — with a 50-run Monte Carlo ensemble. A dedicated **Cluster Migration** indicator surfaces in real time when commuter demand shifts away from rail toward substitution clusters; demand is redistributed weighted 50 % car / 30 % home office / 15 % alternative mobility / 5 % air, with a `migration_floor` that prevents structural-dependent commuters from being routed away entirely. Rail trust erodes with hysteresis (faster down, slower up), making the social space a true second-order indicator rather than a passive consequence.
 
 The structural pathways represent different inner architectures responding to the same external shocks — not three possible futures, but three different response capacities:
 
@@ -48,6 +50,11 @@ The structural pathways represent different inner architectures responding to th
 | **Financial Stability** | Liquidity and bank-funding flows | Triple-layer (Cyber scenario) |
 | **Economic Output** | Real-economy capacity under cyber stress | Triple-layer (Cyber scenario) |
 | **Active Threat** | Live attack type / actor / target / intensity | Event-driven (Cyber scenario) |
+| **Digital Resilience** | IT infrastructure availability under cyber stress | Quad-layer (Critical Infra scenario) |
+| **Rail Operability** | Capacity of main nodes, signaling, dispatching, regional network | Quad-layer (Critical Infra scenario) |
+| **Economic Output** | Supply chain, freight, production, services capacity | Quad-layer (Critical Infra scenario) |
+| **Social Mobility** | Mobility cluster supply (rail commuters + substitution clusters) | Quad-layer (Critical Infra scenario) |
+| **Cluster Migration** | Live demand share of rail commuters vs. substitution flow | Event-driven (Critical Infra scenario) |
 
 Traditional monitoring only watches Stability. This demo shows why Early Warning matters — and why the spread between pathways is the signal, not just the level.
 
@@ -92,19 +99,23 @@ core_lite/                       # Lightweight simulation engine
   financial_ensemble.py          # Financial Monte Carlo ensemble runner (N=50)
   cyber_cloud_simulation.py      # Cloud & Cyber triple-space simulation
   cyber_cloud_ensemble.py        # Cyber Monte Carlo ensemble runner (N=50)
+  critical_infra_simulation.py   # Rail & Critical Infrastructure quad-space simulation
+  critical_infra_ensemble.py     # Critical Infra Monte Carlo ensemble runner (N=50)
 scenarios/                       # Scenario loaders and event timelines
   basic.py
   energy.py / energy_events.py
   pandemic.py / pandemic_events.py
   financial.py / financial_events.py
   cyber_cloud.py / cyber_cloud_events.py
+  critical_infra.py / critical_infra_events.py
 visualization/                   # Network plot with dynamic layout and legend
-  network_plot.py                # Unified plot + context-aware legend (2- or 3-space)
+  network_plot.py                # Unified plot + context-aware legend (2-, 3- or 4-space)
 data/                            # Node and edge definitions per scenario
   nodes.csv / edges.csv                        # Basic / Energy
   pandemic_nodes.csv / pandemic_edges.csv
   financial_nodes.csv / financial_edges.csv
   cyber_cloud_nodes.csv / cyber_cloud_edges.csv
+  critical_infra_nodes.csv / critical_infra_edges.csv
 app_demo.py                      # Streamlit app
 ```
 
@@ -120,6 +131,7 @@ Key technical choices:
 - Structural internals: `capacity_buffer`, `shock_pressure`, `stability_margin` computed per node per step
 - Early Warning: globally-normalized structural drift combining four erosion sources with automatic lead-time detection; visualized as vline markers and shaded lead-time zones in the chart
 - Network legend: context-aware — adapts node labels, bridge entry, and metrics section to the active scenario (2-space financial or 3-space cyber)
+- Critical Infrastructure simulation: four coupled spaces (digital + rail + economic + social) with seven cross-space bridges and five intra-social substitution edges; weighted system health (20 % digital · 30 % rail · 25 % economic · 25 % social); event-time `Active Event` tracking and a `Cluster Migration` channel that redistributes commuter demand toward substitution clusters under rail-trust erosion with hysteresis and a structural `migration_floor`
 
 ---
 
@@ -200,7 +212,7 @@ Dieses Projekt veranschaulicht einen zentralen Gedanken:
 
 ## 🔍 Was diese Demo zeigt
 
-Fünf Szenarien, eine Erkenntnis:
+Sechs Szenarien, eine Erkenntnis:
 
 **Basic Demo** — Zwei Netzwerksysteme starten identisch. Eines bleibt stabil unter konstantem Stress. Das andere kollabiert unter zunehmendem Druck. Das Early-Warning-Signal divergiert **Monate bevor** das Stabilitätssignal sinkt — die kommende Krise wird sichtbar, lange bevor sie eintritt.
 
@@ -211,6 +223,8 @@ Fünf Szenarien, eine Erkenntnis:
 **Eurozone Finanzstabilität 2020–2030** — Ein simulierter Stress-Test-Demonstrator für das europäische Finanzsystem. Dies ist keine Prognose — das Szenario zeigt, wie ein scheinbar stabiles Finanzsystem durch steigenden Stress, sinkende Buffer, sektorale Verflechtungen und regionale Rückkopplungen strukturell instabil werden kann. Zwei gekoppelte Räume — ein Sektorraum (Banken, Fonds, Staatsanleihen, Policy) und ein Regionalraum (Länder) — stehen über eine Brückenkante in Wechselwirkung. Phase 1 (2020–2026) rekonstruiert historische Stressereignisse: COVID-Marktschock, Inflationsschub, Zinswende, Bankenstress 2023, CRE-Bewertungsdruck. Phase 2 (2026–2030) projiziert drei Strukturpfade — Contained, Prolonged und Systemic — mit einem Monte-Carlo-Ensemble von 50 Runs.
 
 **Cloud & Cyber-Resilienz 2020–2030** — Ein simulierter Stress-Test-Demonstrator für EU-Cloud- und Cyber-Resilienz über **drei gekoppelte Räume**: einen digitalen Raum (Cloud-Hyperscaler, Identity-Provider, API-Gateways, Payment-Switch, Security-Operations, Backup), einen Finanzraum (EZB, Banken, Zahlungsverkehr, Kapitalmärkte, Versicherer) und einen Wirtschaftsraum (DE/FR/IT/ES-NL-Wirtschaft, KMU, öffentliche Dienste). Fünf Brückenkanten verbinden die Schichten raumübergreifend. Phase 1 (2020–2026) rekonstruiert 26 öffentlich dokumentierte Cyber-Ereignisse: COVID-Cloud-Schub, SolarWinds, Log4Shell, Viasat KA-SAT (mit 5.800 betroffenen Enercon-Turbinen in Deutschland), NoName057(16)-DDoS-Wellen, MOVEit/CL0P, Storm-0558, Akira/Tietoevry, CrowdStrike-Globalausfall, AWS US-EAST-1 DNS-Ausfall, Inkrafttreten der DORA-Verordnung und Operation Eastwood. Phase 2 (2026–2030) projiziert drei strukturelle Entwicklungspfade — Resilient, Hybrid und Fragile — mit einem 50-Lauf-Monte-Carlo-Ensemble. Ein dedizierter **Active Threat**-Indikator zeigt zu jedem Zeitschritt den dominanten Angriffstyp und Akteur (sofern öffentliche Attribution besteht).
+
+> **Schienenverkehr & kritische Infrastruktur 2020–2030** — Ein simulierter Stress-Test-Demonstrator für kritische Infrastruktur über **vier gekoppelte Räume**: einen digitalen Raum (Cloud-Plattform, Identity-Provider, Leitstelle als OT/IT-Brücke, API-Gateway, Kommunikationsnetz), einen Schienenverkehrsraum (Hauptknoten, Stellwerks- und Signaltechnik, Disposition, Wartungskapazität, Regionalnetz), einen Wirtschaftsraum (Lieferkette, Güterverkehr, Produktion, Dienstleistungen, Marktstimmung) und — in diesem Szenario erstmals — einen sozialen Raum aus Mobilitätsclustern (Bahn-Pendler, Auto-Nutzer, Homeoffice, alternative Mobilität, Flugreisen). Sieben Brückenkanten koppeln die Schichten raumübergreifend, fünf Substitutionskanten innerhalb des sozialen Raums tragen die **Cluster-Migration** zwischen Mobilitätsformen. Phase 1 (2020–2026) rekonstruiert öffentlich dokumentierte Vorfälle: den COVID-Pendler-Einbruch und Homeoffice-Schub (Mär 2020), SolarWinds (Dez 2020), die DB-Bahnfunk-Sabotage in Berlin / Schleswig-Holstein / NRW (Okt 2022), die GDL-Streikwellen (Jan 2024), die Riedbahn-Generalsanierung Frankfurt–Mannheim (Jul–Dez 2024), den globalen CrowdStrike-Falcon-Windows-Ausfall (Jul 2024), das Inkrafttreten von DORA (Jan 2025) und einen OT/IT-Brückenkompromiss in einer Verkehrsleitstelle (Okt 2025). Phase 2 (2026–2030) projiziert drei strukturelle Entwicklungspfade — Resilient, Hybrid und Fragile — mit einem 50-Lauf-Monte-Carlo-Ensemble. Ein dedizierter **Cluster-Migration**-Indikator zeigt in Echtzeit, wenn Pendler-Nachfrage von der Bahn zu den Substitutionsclustern abwandert; die Verschiebung wird gewichtet auf 50 % Auto / 30 % Homeoffice / 15 % alternative Mobilität / 5 % Flug verteilt, ein `migration_floor` verhindert, dass strukturell auf die Bahn angewiesene Pendler vollständig herausgeroutet werden. Bahn-Vertrauen erodiert mit Hysterese (schneller runter, langsamer wieder hoch) — der soziale Raum wird damit zum eigenständigen Indikator zweiter Ordnung statt zur passiven Folgegröße.
 
 Die Strukturpfade beschreiben verschiedene innere Architekturen unter denselben äußeren Schocks — keine drei möglichen Zukünfte, sondern drei verschiedene Reaktionskapazitäten:
 
@@ -232,6 +246,11 @@ Die Strukturpfade beschreiben verschiedene innere Architekturen unter denselben 
 | **Financial Stability** | Liquiditäts- und Bankrefinanzierungsflüsse | Triple-Layer (Cyber-Szenario) |
 | **Economic Output** | Realwirtschaftliche Kapazität unter Cyberstress | Triple-Layer (Cyber-Szenario) |
 | **Active Threat** | Aktiver Angriffstyp / Akteur / Ziel / Intensität | Ereignisgesteuert (Cyber-Szenario) |
+| **Digital Resilience** | IT-Infrastruktur-Verfügbarkeit unter Cyber-Stress | Quad-Layer (Critical-Infra-Szenario) |
+| **Rail Operability** | Kapazität Hauptknoten, Signaltechnik, Disposition, Regionalnetz | Quad-Layer (Critical-Infra-Szenario) |
+| **Economic Output** | Lieferketten-, Güter-, Produktions-, Service-Kapazität | Quad-Layer (Critical-Infra-Szenario) |
+| **Social Mobility** | Versorgung Mobilitätscluster (Bahn-Pendler + Substitutionscluster) | Quad-Layer (Critical-Infra-Szenario) |
+| **Cluster Migration** | Live-Anteil Bahn-Pendler-Nachfrage vs. Substitutionsfluss | Event-getrieben (Critical-Infra-Szenario) |
 
 Traditionelles Monitoring beobachtet nur Stability. Diese Demo zeigt, warum Early Warning entscheidend ist — und warum die Spreizung zwischen den Pfaden das eigentliche Signal ist, nicht das absolute Niveau.
 
@@ -276,19 +295,23 @@ core_lite/                       # Leichtgewichtige Simulation
   financial_ensemble.py          # Finanz Monte-Carlo-Ensemble-Runner (N=50)
   cyber_cloud_simulation.py      # Cloud & Cyber Triple-Space-Simulation
   cyber_cloud_ensemble.py        # Cyber Monte-Carlo-Ensemble-Runner (N=50)
+  critical_infra_simulation.py   # Schienenverkehr & kritische Infrastruktur (Vier-Raum)
+  critical_infra_ensemble.py     # Critical-Infra Monte-Carlo-Ensemble-Runner (N=50)
 scenarios/                       # Szenario-Loader und Event-Zeitlinien
   basic.py
   energy.py / energy_events.py
   pandemic.py / pandemic_events.py
   financial.py / financial_events.py
   cyber_cloud.py / cyber_cloud_events.py
+  critical_infra.py / critical_infra_events.py
 visualization/                   # Netzwerk-Plot mit dynamischem Layout und Legende
-  network_plot.py                # Einheitlicher Plot + kontextbewusste Legende (2- oder 3-Raum)
+  network_plot.py                # Einheitlicher Plot + kontextbewusste Legende (2-, 3- oder 4-Raum)
 data/                            # Knoten- und Kantendefinitionen je Szenario
   nodes.csv / edges.csv                        # Basic / Energy
   pandemic_nodes.csv / pandemic_edges.csv
   financial_nodes.csv / financial_edges.csv
   cyber_cloud_nodes.csv / cyber_cloud_edges.csv
+  critical_infra_nodes.csv / critical_infra_edges.csv
 app_demo.py                      # Streamlit-App
 ```
 
@@ -304,6 +327,7 @@ Wesentliche technische Entscheidungen:
 - Strukturelle Interna: `capacity_buffer`, `shock_pressure`, `stability_margin` pro Knoten und Schritt
 - Frühwarnung: global normierter struktureller Drift aus vier Erosionsquellen mit automatischer Vorlaufzeit-Erkennung; im Chart als vline-Marker und schattierte Vorlaufzonen visualisiert
 - Netzwerk-Legende: kontextbewusst — passt Knotenbezeichnungen, Bridge-Eintrag und Metriken-Abschnitt automatisch an das aktive Szenario an (2-Raum financial oder 3-Raum cyber)
+- Critical-Infrastructure-Simulation: vier gekoppelte Räume (digital + rail + economic + social) mit sieben Cross-Space-Brücken und fünf Substitutionskanten im sozialen Raum; gewichtete System-Health (20 % digital · 30 % rail · 25 % economic · 25 % social); Event-Zeit-`Active Event`-Tracking und ein `Cluster-Migration`-Kanal, der Pendler-Nachfrage bei Bahn-Vertrauens-Erosion mit Hysterese und strukturellem `migration_floor` auf Substitutionscluster umverteilt
 
 ---
 

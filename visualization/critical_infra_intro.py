@@ -5,13 +5,8 @@ Liefert zwei Funktionen analog zum Eurozone-/Cyber-Cloud-Pattern:
   - render_critical_infra_primer():  grosse Card vor dem ersten Run
   - render_critical_infra_intro():   kompakter Expander ueber den Controls
 
-Das Modul ist bewusst eigenstaendig: keine Aenderung an deiner bestehenden
-visualization/scenario_intro.py noetig. Importiere die beiden Funktionen
-direkt im critical_infra-Branch in app_demo.py.
-
-Texte folgen dem gleichen Strukturmuster wie die anderen Szenarien
-(TOPIC / PROBLEM / WHAT THIS SCENARIO SHOWS / NETWORK PLOT / SIGNAL CHART
-/ RESONANCE SPACES + KEY TAKEAWAYS).
+Theme-aware: das CSS nutzt currentColor/opacity statt harter weisser
+Textfarben, damit es in Light- und Dark-Mode gleichermassen lesbar ist.
 """
 
 import streamlit as st
@@ -72,7 +67,6 @@ PRIMER = {
     ),
 }
 
-# Key Takeaways: Kurze, knackige Punkte für die grüne Box (analog Screenshot)
 TAKEAWAYS = [
     "Cross-space coupling is where systemic risk lives — not in any single domain.",
     "Trust hysteresis: once commuter trust drops below the floor, rail share does not return.",
@@ -81,7 +75,10 @@ TAKEAWAYS = [
 
 
 # ============================================================
-# CSS / STYLE
+# CSS — THEME-AWARE
+# Keine harten Text-Farben. currentColor erbt vom Streamlit-Theme.
+# Backgrounds/Borders mit neutralen Graustufen, die in Light und
+# Dark gleichermassen funktionieren.
 # ============================================================
 
 _CARD_CSS = """
@@ -93,8 +90,8 @@ _CARD_CSS = """
   margin-top: 12px;
 }
 .ci-primer-card {
-  background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(128, 128, 128, 0.08);
+  border: 1px solid rgba(128, 128, 128, 0.22);
   border-radius: 8px;
   padding: 10px 14px;
 }
@@ -102,26 +99,38 @@ _CARD_CSS = """
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: rgba(255,255,255,0.55);
+  opacity: 0.65;
   margin-bottom: 4px;
 }
 .ci-primer-card .ci-body {
   font-size: 13px;
   line-height: 1.45;
-  color: rgba(255,255,255,0.88);
+  opacity: 0.92;
 }
 .ci-primer-card.full {
   grid-column: span 2;
 }
+.ci-scenario-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  margin-top: 6px;
+}
+.ci-scenario-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
 .ci-takeaways {
   margin-top: 14px;
-  background: rgba(82,196,107,0.08);
+  background: rgba(82, 196, 107, 0.10);
   border-left: 3px solid #52c46b;
   border-radius: 0 8px 8px 0;
   padding: 10px 16px;
 }
 .ci-takeaways .ci-tlabel {
-  color: #52c46b;
+  color: #2e8a47;
   font-weight: 600;
   font-size: 13px;
   margin-bottom: 6px;
@@ -129,11 +138,16 @@ _CARD_CSS = """
 .ci-takeaways ul {
   margin: 0;
   padding-left: 18px;
-  color: #d4d4d8;
   font-size: 13px;
 }
 .ci-takeaways li {
   margin: 3px 0;
+  opacity: 0.92;
+}
+@media (prefers-color-scheme: dark) {
+  .ci-takeaways .ci-tlabel {
+    color: #52c46b;
+  }
 }
 </style>
 """
@@ -164,17 +178,12 @@ def _takeaways():
 # ============================================================
 
 def render_critical_infra_primer():
-    """Big card shown before the first ensemble run.
-
-    Replaces the standard render_primer_card() call for this scenario.
-    """
+    """Big card shown before the first ensemble run."""
     st.markdown(_CARD_CSS, unsafe_allow_html=True)
 
     st.markdown(
-        "<div style='font-size:11px;letter-spacing:0.08em;text-transform:uppercase;"
-        "color:rgba(255,255,255,0.55);margin-top:6px;'>SCENARIO</div>"
-        "<div style='font-size:18px;font-weight:600;margin-bottom:4px;'>"
-        "Rail &amp; Critical Infrastructure</div>",
+        '<div class="ci-scenario-label">SCENARIO</div>'
+        '<div class="ci-scenario-title">Rail &amp; Critical Infrastructure</div>',
         unsafe_allow_html=True,
     )
 
